@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -61,12 +62,54 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// decoyHash is a valid bcrypt digest of a value nobody knows, verified when
+// the submitted username does not exist.
+//
+// Without it, an unknown username returned before bcrypt ran and a known one
+// returned after — a difference of roughly 250ms at cost 12, which is a
+// reliable oracle for "does this account exist" from anywhere on the
+// internet. Comparing against the decoy makes both paths do the same work.
+//
+// Built once at startup from random bytes: a hard-coded digest would be a
+// published constant, and a fixed input would let anyone confirm the decoy
+// by timing a login against a password they chose.
+var decoyHash = func() []byte {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		// Falling back to a fixed value would still equalise the timing,
+		// which is all this is for, but there is no reason to expect
+		// entropy failure here and silently degrading is how a control
+		// stops being one.
+		panic("entropy failure building login decoy hash: " + err.Error())
+	}
+	h, err := bcrypt.GenerateFromPassword(secret, repository.BcryptCost)
+	if err != nil {
+		panic("cannot build login decoy hash: " + err.Error())
+	}
+	return h
+}()
+
 func (s *Server) HandleLoginPost(w http.ResponseWriter, r *http.Request) {
 	username := auth.NormalizeUsername(r.FormValue("username"))
 	password := r.FormValue("password")
 
-	userID, hash, role, isLocked, err := s.pgRepo.GetUserByUsername(r.Context(), username)
-	if err != nil {
+	userID, hash, role, isLocked, lookupErr := s.pgRepo.GetUserByUsername(r.Context(), username)
+
+	// Always spend a bcrypt comparison, even when the username is unknown,
+	// so the response time does not disclose whether the account exists.
+	compareAgainst := []byte(hash)
+	if lookupErr != nil {
+		compareAgainst = decoyHash
+	}
+	passwordOK := bcrypt.CompareHashAndPassword(compareAgainst, []byte(password)) == nil
+
+	if lookupErr != nil || !passwordOK {
+		if lookupErr == nil {
+			s.auditLog.Log(r.Context(), audit.ActionLoginFailure, "Auth", "Login", map[string]interface{}{
+				"username": username,
+				"role":     role,
+			})
+		}
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK)
 		} else {
@@ -76,6 +119,11 @@ func (s *Server) HandleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Locked is reported only after the password checks out. Reporting it
+	// first told anyone who guessed a username that the account existed and
+	// was suspended; now that is only visible to someone who could have
+	// logged in anyway, and the legitimate user still gets a message that
+	// explains why they cannot.
 	if isLocked {
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK)
@@ -83,21 +131,6 @@ func (s *Server) HandleLoginPost(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 		}
 		fmt.Fprintf(w, "Account access suspended. Contact administrator.")
-		return
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	if err != nil {
-		s.auditLog.Log(r.Context(), audit.ActionLoginFailure, "Auth", "Login", map[string]interface{}{
-			"username": username,
-			"role":     role,
-		})
-		if r.Header.Get("HX-Request") == "true" {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusUnauthorized)
-		}
-		fmt.Fprintf(w, "Invalid credentials")
 		return
 	}
 	s.auditLog.Log(r.Context(), audit.ActionLoginSuccess, "Auth", "Login", map[string]interface{}{
