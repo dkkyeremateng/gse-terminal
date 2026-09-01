@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gse-ssd
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-balanced
+  # Use replication-type: regional-pd for cross-zone HA (paid feature).
+  replication-type: none
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain

@@ -1,0 +1,8 @@
+[Unit]
+Description=GSE Terminal database backup
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/gse-terminal
+ExecStart=/opt/gse-terminal/scripts/backup.sh /var/backups/gse-terminal

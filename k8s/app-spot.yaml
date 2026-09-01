@@ -1,0 +1,195 @@
+# Spot-capacity tier for the gse-app workload.
+#
+# Pod template is intentionally a near-clone of k8s/app.yaml. When you
+# change image, env vars, probes, resources, or security context in
+# app.yaml, change them HERE TOO. The two diverge only in:
+#   - replicas: fixed at 1 (no HPA — Spot is bonus capacity, not scale)
+#   - terminationGracePeriodSeconds: 25 (matches GCE Spot preemption notice)
+#   - nodeSelector + tolerations: routes pods onto Spot capacity
+#
+# Shared `app: gse-app` label means the existing Service, PDB, and
+# GCPBackendPolicy in app.yaml apply to these pods automatically.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gse-app-spot
+  namespace: gse-terminal
+  labels:
+    app: gse-app
+    tier: spot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gse-app
+      tier: spot
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: gse-app
+        tier: spot
+    spec:
+      serviceAccountName: gse-app
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 25
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      tolerations:
+      - key: cloud.google.com/gke-spot
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: gse-app
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: gse-app
+      containers:
+      - name: app
+        image: us-central1-docker.pkg.dev/teckdroids/gse/gse-terminal:__IMAGE_TAG__
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: APP_ENV
+          value: "production"
+        - name: POSTGRES_HOST
+          value: "postgres"
+        - name: POSTGRES_USER
+          value: "gse_user"
+        - name: POSTGRES_DB
+          value: "gse_db"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: postgres-password
+        - name: QUESTDB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: questdb-password
+        - name: QUESTDB_URL
+          value: "postgres://admin:$(QUESTDB_PASSWORD)@questdb:8812/qdb?sslmode=disable"
+        - name: QUESTDB_ILP_TCP_URL
+          value: "questdb:9009"
+        - name: REDIS_URL
+          value: "redis:6379"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: jwt-secret
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: gemini-api-key
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: anthropic-api-key
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: openai-api-key
+              optional: true
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: google-client-id
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: google-client-secret
+        - name: GOOGLE_REDIRECT_URL
+          value: "https://gse.teckdroids.com/auth/google/callback"
+        - name: VAPID_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: vapid-public-key
+        - name: VAPID_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: vapid-private-key
+        - name: ALLOWED_ORIGINS
+          value: "https://gse.teckdroids.com"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            # Headroom for the headless Chromium the 15:30 UTC scrape spawns
+            # in-process. Steady-state usage is well under the old 1Gi; the
+            # limit only has to survive the daily browser run.
+            memory: "2Gi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 24
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}

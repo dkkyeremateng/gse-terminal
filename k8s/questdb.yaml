@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: questdb
+  namespace: gse-terminal
+spec:
+  serviceName: "questdb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: questdb
+  template:
+    metadata:
+      labels:
+        app: questdb
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: questdb
+        image: questdb/questdb:7.4.0
+        ports:
+        - containerPort: 8812
+          name: postgres
+        - containerPort: 9000
+          name: http
+        - containerPort: 9009
+          name: ilp
+        env:
+        - name: QDB_TELEMETRY_ENABLED
+          value: "false"
+        - name: QDB_PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gse-secrets
+              key: questdb-password
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "2Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: questdb-data
+          mountPath: /var/lib/questdb
+        livenessProbe:
+          tcpSocket:
+            port: 8812
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 8812
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+  volumeClaimTemplates:
+  - metadata:
+      name: questdb-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "gse-ssd"
+      resources:
+        requests:
+          storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: questdb
+  namespace: gse-terminal
+spec:
+  selector:
+    app: questdb
+  ports:
+  - name: postgres
+    protocol: TCP
+    port: 8812
+    targetPort: 8812
+  - name: http
+    protocol: TCP
+    port: 9000
+    targetPort: 9000
+  - name: ilp
+    protocol: TCP
+    port: 9009
+    targetPort: 9009
+  clusterIP: None

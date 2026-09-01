@@ -1,0 +1,10 @@
+# Nightly backup, an hour after the 15:30 UTC scrape has landed.
+[Unit]
+Description=Nightly GSE Terminal backup
+
+[Timer]
+OnCalendar=*-*-* 16:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,936 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Settings page — "The Account Ledger"
+ *
+ * Editorial ledger / financial-dossier treatment for the /settings surface.
+ * Intentionally restrained colour (amber accent on paper grain) but loud on
+ * typography — giant Fraunces nameplates paired with JetBrains Mono kickers
+ * and marginalia. Keeps the terminal's warm palette so the page reads as
+ * part of the same publication.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/* Make the global `.hidden` utility win over `.panel-row`'s `display: grid`
+   and any flex/grid container in this page. Matches Tailwind's semantics but
+   ensures feature modules (features/alerts.js, features/api-keys.js) can
+   still reliably hide/show their toggled containers. */
+.settings-body .hidden { display: none !important; }
+
+/* ── Page frame ────────────────────────────────────────────────────────── */
+
+.settings-body {
+    min-height: 100vh;
+    background:
+        radial-gradient(at 8% 0%, rgba(255,177,43,0.06) 0, transparent 40%),
+        radial-gradient(at 92% 100%, rgba(178,58,23,0.05) 0, transparent 40%),
+        var(--ink);
+    color: var(--paper);
+    overflow-x: hidden;
+}
+
+.settings-shell {
+    position: relative;
+    max-width: 1260px;
+    margin: 0 auto;
+    padding: 20px 20px 120px;
+}
+@media (min-width: 768px) {
+    .settings-shell { padding: 28px 40px 160px; }
+}
+
+/* A quiet ruled border that runs the full height of the shell on desktop.
+   Evokes a printed-page margin rule without being heavy. */
+.settings-shell::before,
+.settings-shell::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: linear-gradient(
+        to bottom,
+        transparent 0%,
+        var(--hair) 8%,
+        var(--hair) 92%,
+        transparent 100%
+    );
+    pointer-events: none;
+    display: none;
+}
+@media (min-width: 1100px) {
+    .settings-shell::before { left: 0; display: block; }
+    .settings-shell::after  { right: 0; display: block; }
+}
+
+/* ── Masthead ──────────────────────────────────────────────────────────── */
+
+.settings-masthead {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 4px 0 20px;
+    border-bottom: 1px solid var(--hair-strong);
+    position: relative;
+}
+.settings-masthead::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -5px;
+    height: 1px;
+    background: var(--hair);
+}
+@media (min-width: 900px) {
+    .settings-masthead { grid-template-columns: auto 1fr auto; }
+}
+
+.masthead-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    min-width: 0;
+}
+.masthead-brand .gse-mark { flex-shrink: 0; }
+.masthead-brand .leading-none { line-height: 1; }
+
+.masthead-dateline {
+    display: none;
+    text-align: center;
+    line-height: 1.1;
+    gap: 6px;
+    flex-direction: column;
+}
+@media (min-width: 900px) { .masthead-dateline { display: flex; } }
+
+.masthead-dateline .title {
+    font-family: 'Inter', serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.005em;
+    font-variation-settings: "SOFT" 50, "WONK" 1, "opsz" 144;
+    color: var(--paper);
+}
+.masthead-dateline .title em {
+    color: var(--amber);
+    font-style: italic;
+    font-weight: 400;
+    font-variation-settings: "SOFT" 100, "WONK" 1;
+}
+.masthead-dateline .meta {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.55);
+}
+.masthead-dateline .meta .dot {
+    width: 3px; height: 3px;
+    background: var(--amber);
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.masthead-actions { display: flex; align-items: center; gap: 8px; justify-self: end; }
+
+.masthead-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 9px 14px;
+    border: 1px solid var(--hair);
+    color: rgba(244,236,216,0.75);
+    text-decoration: none;
+    background: transparent;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.masthead-btn:hover { border-color: var(--amber); color: var(--amber); }
+.masthead-btn--icon { padding: 9px; }
+
+/* ── Hero / Dossier title card ─────────────────────────────────────────── */
+
+.dossier-hero {
+    padding: 52px 0 40px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 36px;
+    align-items: center;
+}
+@media (min-width: 720px) {
+    .dossier-hero {
+        grid-template-columns: 1fr auto;
+        padding: 72px 0 56px;
+    }
+}
+
+.eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--amber);
+    font-weight: 700;
+}
+.eyebrow::before {
+    content: "";
+    width: 28px;
+    height: 1px;
+    background: var(--amber);
+}
+
+.dossier-name {
+    font-family: 'Inter', serif;
+    font-size: clamp(52px, 11vw, 124px);
+    line-height: 0.9;
+    font-weight: 400;
+    letter-spacing: -0.035em;
+    margin: 14px 0 22px;
+    font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+    color: var(--paper);
+    word-break: break-word;
+}
+.dossier-name::after {
+    content: ".";
+    color: var(--amber);
+    font-style: italic;
+    font-variation-settings: "SOFT" 100, "WONK" 1;
+    margin-left: 0.05em;
+}
+
+.dossier-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--hair-strong);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.75);
+    background: rgba(16,14,10,0.4);
+}
+.chip::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: rgba(244,236,216,0.5);
+    flex-shrink: 0;
+}
+.chip--primary {
+    border-color: var(--amber);
+    color: var(--amber);
+}
+.chip--primary::before {
+    background: var(--amber);
+    box-shadow: 0 0 10px rgba(255,177,43,0.6);
+    animation: chip-pulse 2.4s ease-in-out infinite;
+}
+.chip--muted {
+    color: rgba(244,236,216,0.5);
+}
+@keyframes chip-pulse {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+}
+
+.dossier-bio {
+    max-width: 540px;
+    font-family: 'Inter', serif;
+    font-size: clamp(16px, 1.6vw, 19px);
+    line-height: 1.5;
+    color: rgba(244,236,216,0.72);
+    font-weight: 300;
+    font-style: italic;
+    font-variation-settings: "SOFT" 50, "WONK" 0;
+}
+
+/* Monogram (user's initial inside a dashed amber ring) */
+.monogram-wrap {
+    display: flex;
+    justify-content: flex-start;
+    position: relative;
+}
+@media (min-width: 720px) {
+    .monogram-wrap { justify-content: flex-end; }
+}
+.monogram {
+    width: clamp(128px, 18vw, 196px);
+    height: clamp(128px, 18vw, 196px);
+    display: grid;
+    place-items: center;
+    font-family: 'Inter', serif;
+    font-weight: 600;
+    font-size: clamp(68px, 10vw, 112px);
+    letter-spacing: -0.04em;
+    color: var(--ink);
+    background: var(--amber);
+    border-radius: 50%;
+    position: relative;
+    font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 144;
+    box-shadow:
+        0 0 0 1px rgba(16,14,10,0.3) inset,
+        0 18px 40px -8px rgba(255,177,43,0.22);
+}
+.monogram::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
+    border: 1px dashed rgba(255,177,43,0.55);
+    border-radius: 50%;
+    animation: monogram-rotate 80s linear infinite;
+}
+.monogram::before {
+    content: "No. " attr(data-seal);
+    position: absolute;
+    bottom: -26px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.45);
+    white-space: nowrap;
+}
+@keyframes monogram-rotate { to { transform: rotate(360deg); } }
+
+/* ── Stats strip ───────────────────────────────────────────────────────── */
+
+.dossier-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    margin: 12px 0 72px;
+    border: 1px solid var(--hair-strong);
+    background: rgba(16,14,10,0.5);
+}
+@media (min-width: 768px) { .dossier-stats { grid-template-columns: repeat(4, 1fr); } }
+
+.stat {
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: relative;
+    border-right: 1px solid var(--hair);
+    border-bottom: 1px solid var(--hair);
+    min-width: 0;
+}
+.stat:nth-child(2n) { border-right: 0; }
+@media (min-width: 768px) {
+    .stat { border-bottom: 0; }
+    .stat:nth-child(n) { border-right: 1px solid var(--hair); }
+    .stat:last-child   { border-right: 0; }
+}
+.stat::before {
+    content: "";
+    position: absolute;
+    top: 22px; left: 24px;
+    width: 18px; height: 1px;
+    background: var(--amber);
+    opacity: 0.6;
+}
+.stat-k {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.55);
+    padding-top: 10px;
+}
+.stat-v {
+    font-family: 'Inter', serif;
+    font-size: clamp(22px, 2.6vw, 30px);
+    line-height: 1;
+    color: var(--paper);
+    font-variation-settings: "SOFT" 30, "opsz" 144;
+    letter-spacing: -0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.stat-v em {
+    color: var(--amber);
+    font-style: italic;
+    font-variation-settings: "SOFT" 100, "WONK" 1;
+}
+.stat-note {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.4);
+}
+
+/* ── Mobile contents chip row ──────────────────────────────────────────── */
+
+.dossier-chipnav {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 40px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+}
+.dossier-chipnav::-webkit-scrollbar { display: none; }
+.dossier-chipnav a {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    border: 1px solid var(--hair);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.65);
+    text-decoration: none;
+    display: inline-flex;
+    gap: 8px;
+}
+.dossier-chipnav a .num { color: var(--amber); }
+.dossier-chipnav a.active {
+    border-color: var(--amber);
+    color: var(--amber);
+}
+@media (min-width: 960px) { .dossier-chipnav { display: none; } }
+
+/* ── Main grid (TOC + content) ─────────────────────────────────────────── */
+
+.dossier-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 40px;
+}
+@media (min-width: 960px) {
+    .dossier-grid { grid-template-columns: 220px 1fr; gap: 72px; }
+}
+
+.dossier-toc {
+    display: none;
+    position: sticky;
+    top: 24px;
+    align-self: start;
+}
+@media (min-width: 960px) { .dossier-toc { display: block; } }
+.dossier-toc .eyebrow {
+    display: block;
+    margin-bottom: 20px;
+    color: rgba(244,236,216,0.45);
+    letter-spacing: 0.28em;
+    font-size: 9px;
+}
+.dossier-toc .eyebrow::before { background: rgba(244,236,216,0.3); width: 18px; }
+.dossier-toc nav {
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--hair);
+}
+.dossier-toc a {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 14px;
+    align-items: baseline;
+    padding: 14px 0 14px 20px;
+    margin-left: -1px;
+    border-left: 2px solid transparent;
+    color: rgba(244,236,216,0.55);
+    text-decoration: none;
+    transition: color 0.2s, border-color 0.2s, padding-left 0.2s;
+}
+.dossier-toc a:hover { color: var(--paper); }
+.dossier-toc a.active {
+    color: var(--amber);
+    border-left-color: var(--amber);
+    padding-left: 24px;
+}
+.dossier-toc .toc-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    font-weight: 700;
+    min-width: 20px;
+}
+.dossier-toc .toc-label {
+    font-family: 'Inter', serif;
+    font-size: 17px;
+    font-variation-settings: "SOFT" 40, "WONK" 1;
+    letter-spacing: -0.01em;
+}
+
+.dossier-content > * + * { margin-top: 4px; }
+
+/* ── Sections ──────────────────────────────────────────────────────────── */
+
+.dossier-section {
+    padding: 20px 0 64px;
+    scroll-margin-top: 32px;
+    position: relative;
+}
+.dossier-section + .dossier-section {
+    border-top: 1px solid var(--hair);
+    padding-top: 64px;
+}
+
+.dossier-section__head {
+    margin-bottom: 32px;
+    max-width: 680px;
+}
+
+.section-num {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    color: var(--amber);
+    font-weight: 700;
+    margin-bottom: 14px;
+}
+.section-num::before {
+    content: "";
+    width: 32px; height: 1px;
+    background: var(--amber);
+}
+
+.section-title {
+    font-family: 'Inter', serif;
+    font-size: clamp(34px, 4vw, 52px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    margin: 0 0 18px;
+    color: var(--paper);
+    font-weight: 400;
+    font-variation-settings: "SOFT" 40, "WONK" 1, "opsz" 144;
+}
+.section-title em {
+    color: var(--amber);
+    font-style: italic;
+    font-weight: 400;
+    font-variation-settings: "SOFT" 100, "WONK" 1;
+}
+
+.section-lede {
+    font-family: 'Inter', serif;
+    font-size: 17px;
+    line-height: 1.55;
+    color: rgba(244,236,216,0.68);
+    font-weight: 300;
+    margin: 0 0 10px;
+    font-variation-settings: "SOFT" 40, "WONK" 0;
+}
+
+.role-hint {
+    display: inline-block;
+    margin-top: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.45);
+    padding: 4px 10px;
+    border: 1px solid var(--hair);
+}
+.role-hint:empty { display: none; }
+
+/* ── Panels ────────────────────────────────────────────────────────────── */
+
+.dossier-panel {
+    border: 1px solid var(--hair-strong);
+    background: rgba(16,14,10,0.55);
+    position: relative;
+}
+.dossier-panel::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    width: 36px; height: 2px;
+    background: var(--amber);
+}
+
+.panel-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 24px 24px;
+    border-bottom: 1px solid var(--hair);
+}
+.panel-row:last-child { border-bottom: 0; }
+@media (min-width: 720px) {
+    .panel-row { grid-template-columns: 160px 1fr; gap: 36px; padding: 28px 32px; }
+}
+.panel-row__k {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.55);
+    padding-top: 4px;
+    align-self: start;
+    position: relative;
+}
+@media (min-width: 720px) {
+    .panel-row__k::before {
+        content: "";
+        position: absolute;
+        top: 9px; right: -18px;
+        width: 6px; height: 1px;
+        background: var(--amber);
+        opacity: 0.5;
+    }
+}
+.panel-row__v { min-width: 0; }
+
+/* Features render raw markup with Tailwind utilities into these containers —
+   give them a consistent baseline here. */
+#account-identity,
+#account-email-body > *,
+#account-password-body > *,
+#alert-rules-list,
+#api-key-list {
+    color: rgba(244,236,216,0.88);
+}
+#account-email-body,
+#account-password-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+#account-identity {
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 !important;
+    display: flex;
+    gap: 16px;
+    width: 100%;
+}
+
+/* Inputs rendered by features/account.js — normalise to the same look as
+   the rest of the dossier. The module writes Tailwind utilities; this
+   rule catches every input inside the two account sub-containers and
+   rewrites the visual to match `.field-input`. */
+#account-email-body input,
+#account-password-body input {
+    width: 100%;
+    padding: 11px 14px !important;
+    background: rgba(244,236,216,0.035) !important;
+    border: 1px solid var(--hair-strong) !important;
+    color: var(--paper) !important;
+    font-size: 14px !important;
+    font-family: 'Inter', system-ui, sans-serif !important;
+    border-radius: 0 !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+#account-email-body input:focus,
+#account-password-body input:focus {
+    outline: none !important;
+    border-color: var(--amber) !important;
+    box-shadow: 0 0 0 1px var(--amber), 0 0 0 4px rgba(255,177,43,0.1) !important;
+    background: rgba(244,236,216,0.06) !important;
+}
+#account-email-body button[type="submit"],
+#account-password-body button[type="submit"] {
+    padding: 11px 20px !important;
+    background: var(--amber) !important;
+    color: var(--ink) !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 0.22em !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    border: 0 !important;
+    cursor: pointer;
+    transition: background 0.18s ease;
+    align-self: flex-start;
+}
+#account-email-body button[type="submit"]:hover,
+#account-password-body button[type="submit"]:hover {
+    background: var(--paper) !important;
+}
+
+/* The "change email" <details> expander — make it read like a dossier
+   disclosure row, not the boxed Tailwind card. */
+#account-email-body details {
+    border: 1px solid var(--hair) !important;
+    padding: 0 !important;
+    background: rgba(244,236,216,0.02);
+}
+#account-email-body details > summary {
+    padding: 12px 14px !important;
+    margin: 0;
+}
+#account-email-body details[open] > *:not(summary) {
+    padding: 0 14px 14px !important;
+}
+
+/* The labels inside account.js's password form already use `.mono text-[9px]`
+   Tailwind utilities which terminal.css remaps to JetBrains Mono. They
+   render fine; no override needed. */
+
+/* Alert rules list rows rendered by features/alerts.js — give the
+   container a hair border so rows sit inside a clean frame. */
+#alert-rules-list:not(.hidden) {
+    border: 1px solid var(--hair-strong);
+    background: rgba(244,236,216,0.02);
+}
+
+/* ── Fields / buttons / rule form ──────────────────────────────────────── */
+
+.field-stack { display: flex; flex-direction: column; gap: 12px; }
+.field-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.field-row > .field-input { flex: 1 1 220px; min-width: 0; }
+.field-label {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.55);
+    margin-bottom: 6px;
+}
+.field-input {
+    width: 100%;
+    padding: 11px 14px;
+    background: rgba(244,236,216,0.035);
+    border: 1px solid var(--hair-strong);
+    color: var(--paper);
+    font-size: 14px;
+    font-family: 'Inter', system-ui, sans-serif;
+    border-radius: 0;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    appearance: none;
+}
+.field-input:focus {
+    outline: none;
+    border-color: var(--amber);
+    box-shadow: 0 0 0 1px var(--amber), 0 0 0 4px rgba(255,177,43,0.1);
+    background: rgba(244,236,216,0.06);
+}
+.field-input::placeholder { color: rgba(244,236,216,0.35); }
+.field-input[type="text"].field-input--symbol {
+    text-transform: uppercase;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.08em;
+}
+.field-input--compact { min-width: 88px; flex: 0 0 auto; }
+.field-status {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    min-height: 14px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 20px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 700;
+    border: 1px solid transparent;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn--primary { background: var(--amber); color: var(--ink); }
+.btn--primary:hover { background: var(--paper); }
+.btn--ghost {
+    background: transparent;
+    border-color: var(--hair-strong);
+    color: rgba(244,236,216,0.7);
+}
+.btn--ghost:hover { border-color: var(--amber); color: var(--amber); }
+
+/* ── Rule form ─────────────────────────────────────────────────────────── */
+
+.rule-form { display: flex; flex-direction: column; gap: 18px; }
+.rule-form__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+}
+@media (min-width: 640px) {
+    .rule-form__grid { grid-template-columns: 1.15fr 1fr 1.4fr; }
+}
+.rule-field { display: flex; flex-direction: column; min-width: 0; }
+.rule-inline { display: flex; gap: 8px; }
+.rule-inline > .field-input { min-width: 0; }
+.rule-inline > .field-input--compact { flex: 0 0 76px; }
+.rule-form__tail {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.rule-form__tail > .field-status { flex: 1 1 180px; }
+
+/* ── Secret banner (new API key) ───────────────────────────────────────── */
+
+.secret-banner {
+    margin-top: 6px;
+    border: 1px solid rgba(255,177,43,0.45);
+    background:
+        linear-gradient(180deg, rgba(255,177,43,0.09), rgba(255,177,43,0.02));
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: relative;
+}
+.secret-banner::before {
+    content: "";
+    position: absolute;
+    top: -1px; left: -1px; right: -1px;
+    height: 2px;
+    background: repeating-linear-gradient(
+        90deg,
+        var(--amber) 0 8px,
+        transparent 8px 14px
+    );
+}
+.secret-banner__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.secret-banner__head > span {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--amber);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.secret-banner__head > span::before {
+    content: "";
+    width: 6px; height: 6px;
+    background: var(--amber);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--amber);
+    animation: chip-pulse 1.4s ease-in-out infinite;
+}
+.secret-banner__code {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: var(--paper);
+    word-break: break-all;
+    background: rgba(0,0,0,0.35);
+    padding: 12px 14px;
+    border: 1px dashed rgba(255,177,43,0.35);
+    user-select: all;
+}
+.secret-banner__warn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(178,58,23,0.95);
+    margin: 0;
+}
+
+.oauth-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 12px 0;
+}
+@media (min-width: 640px) { .oauth-grid { grid-template-columns: 1fr 1fr; } }
+
+.divider-or {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 6px 0;
+}
+.divider-or::before,
+.divider-or::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--hair);
+}
+.divider-or span {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.4);
+}
+
+/* ── Colophon ──────────────────────────────────────────────────────────── */
+
+.dossier-colophon {
+    margin-top: 80px;
+    padding-top: 28px;
+    border-top: 1px solid var(--hair-strong);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: rgba(244,236,216,0.35);
+}
+.dossier-colophon em {
+    font-style: normal;
+    color: var(--amber);
+}
+
+/* ── Toasts ───────────────────────────────────────────────────────────── */
+
+#toast-container {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ── Stagger-in page load ─────────────────────────────────────────────── */
+
+@keyframes dossier-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.dossier-hero,
+.dossier-stats,
+.dossier-toc,
+.dossier-section {
+    animation: dossier-in 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.dossier-hero                       { animation-delay: 40ms; }
+.dossier-stats                      { animation-delay: 140ms; }
+.dossier-toc                        { animation-delay: 220ms; }
+.dossier-section:nth-of-type(1)     { animation-delay: 240ms; }
+.dossier-section:nth-of-type(2)     { animation-delay: 300ms; }
+.dossier-section:nth-of-type(3)     { animation-delay: 360ms; }

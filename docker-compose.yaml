@@ -1,0 +1,113 @@
+services:
+  questdb:
+    image: questdb/questdb:7.4.0
+    container_name: gse_questdb
+    environment:
+      - QDB_TELEMETRY_ENABLED=false
+    ports:
+      - "127.0.0.1:8812:8812" # Postgres wire protocol
+      - "127.0.0.1:9000:9000" # REST API & Web console
+      - "127.0.0.1:9009:9009" # ILP
+    volumes:
+      - questdb_data:/var/lib/questdb
+    networks: [gse]
+    healthcheck:
+      # The questdb image ships neither curl nor wget, so the old curl probe
+      # could never pass and `depends_on: service_healthy` blocked the app
+      # from ever starting. bash is present, so probe both ports it serves
+      # (8812 pgwire for queries, 9000 REST/ILP for writes) over /dev/tcp.
+      test: ["CMD", "bash", "-c", "(</dev/tcp/localhost/8812) && (</dev/tcp/localhost/9000)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gse_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gse_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-gse_db}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [gse]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gse_user} -d ${POSTGRES_DB:-gse_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: gse_redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks: [gse]
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  app:
+    build: .
+    image: gse-terminal:latest
+    container_name: gse_app
+    env_file: .env
+    environment:
+      # .env holds host-side (localhost) endpoints for `go run`; inside the
+      # compose network the services are reachable by service name instead.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      QUESTDB_URL: postgres://admin:quest@questdb:8812/qdb
+      QUESTDB_ILP_TCP_URL: questdb:9009
+      REDIS_URL: redis:6379
+    ports:
+      - "8080:8080"
+    networks: [gse]
+    depends_on:
+      questdb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          # Headroom for the headless Chromium the daily scrape spawns
+          # in-process; the server alone sits far below this.
+          memory: 2g
+
+networks:
+  gse:
+    driver: bridge
+
+volumes:
+  questdb_data:
+  postgres_data:
+  redis_data:

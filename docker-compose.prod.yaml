@@ -1,0 +1,71 @@
+# Production overlay for a single VM.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+#
+# What this changes versus the base file:
+#   - Caddy terminates TLS on 80/443 and proxies to the app. Certificates are
+#     issued and renewed automatically from Let's Encrypt.
+#   - The app is no longer published on the host. Only Caddy is reachable from
+#     outside; the app, both databases, and Redis stay on the internal network.
+#   - Every service restarts unless explicitly stopped, so the stack survives a
+#     reboot once Docker itself is enabled at boot.
+#   - Container logs are capped. The default json-file driver grows without
+#     bound and is a common way to fill a small VM's disk.
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: gse_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates and ACME account keys — must persist
+      - caddy_config:/config
+    environment:
+      # Set both in .env. APP_DOMAIN drives the certificate; ACME_EMAIL gets
+      # the expiry warnings if renewal ever breaks.
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env, e.g. gse.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [gse]
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  app:
+    # Reachable only through Caddy on the internal network.
+    ports: !override []
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      # Caddy sets X-Forwarded-For; without this every client shares one
+      # rate-limit bucket. Safe only because the app is not published.
+      TRUST_PROXY: "true"
+      # Log to stdout only — the container has no writable log directory, and
+      # Docker's json-file driver (capped above) is the collection point.
+      LOG_FILE: ""
+      LOG_FORMAT: json
+    logging: *default-logging
+
+  postgres:
+    restart: unless-stopped
+    logging: *default-logging
+
+  questdb:
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  caddy_data:
+  caddy_config:

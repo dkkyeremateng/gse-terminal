@@ -1,0 +1,72 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gse-gateway
+  namespace: gse-terminal
+  annotations:
+    # TLS is provided via the pre-shared cert referenced in listener options
+    # below. Gateway API does not honour the Ingress-style
+    # `networking.gke.io/managed-certificates` annotation.
+    # The static IP is specified here and referenced in the spec.addresses field.
+    networking.gke.io/static-ip: "gse-ingress-ip"
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  addresses:
+  - type: NamedAddress
+    value: "gse-ingress-ip"
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      mode: Terminate
+      options:
+        networking.gke.io/pre-shared-certs: "mcrt-19f2caf9-f2b4-4c5e-9a43-70e38eaede72"
+    allowedRoutes:
+      namespaces:
+        from: Same
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gse-route
+  namespace: gse-terminal
+spec:
+  parentRefs:
+  - name: gse-gateway
+    # Attach to the HTTPS listener for the primary app traffic
+    sectionName: https
+  hostnames:
+  - "gse.teckdroids.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: gse-app
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gse-route-http-redirect
+  namespace: gse-terminal
+spec:
+  parentRefs:
+  - name: gse-gateway
+    sectionName: http
+  hostnames:
+  - "gse.teckdroids.com"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301

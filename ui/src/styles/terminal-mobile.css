@@ -1,0 +1,1154 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Terminal — mobile (<1024px) overrides.
+ *
+ * Extracted from terminal.css to keep the mobile @media block isolated
+ * from the base tokens / global rules / desktop styles. Imported after
+ * terminal.css in app.js so the cascade order is preserved (mobile
+ * overrides still come later than any universal rules they need to beat).
+ *
+ * Scope: every rule in this file is wrapped in `@media (max-width: 1023px)`.
+ * Add desktop-only rules to terminal.css's existing `@media (min-width: 1024px)`
+ * block, not here.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+    /* ── Mobile tab isolation via body[data-tab] / [data-view] ──
+       Set from JS (_syncTabState on hashchange, and data-view on
+       fetchHistory / clearSelectedStock). No :has(), no :target. */
+
+    /* Stock-only chips: hidden until a stock has been selected */
+    .mobile-tab[data-stock-only] {
+        display: none !important;
+    }
+
+    body[data-view="stock"] .mobile-tab[data-stock-only] {
+        display: inline-flex !important;
+    }
+
+    /* No-stock chips: hidden once a stock is loaded */
+    body[data-view="stock"] .mobile-tab[data-no-stock] {
+        display: none !important;
+    }
+
+    aside.mobile-left-aside {
+        display: none !important;
+    }
+
+    #watchlist-panel-container,
+    #market-pulse-panel,
+    #portfolio-panel {
+        display: none !important;
+    }
+
+    /* Right sidebar: hidden until a stock is loaded */
+    aside.sidebar {
+        display: none !important;
+    }
+
+    body[data-view="stock"] aside.sidebar {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    /* Watchlist tab — show only watchlist */
+    body[data-tab="watchlist"] aside.mobile-left-aside,
+    body[data-tab="watchlist"] #watchlist-panel-container {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    body[data-tab="watchlist"] main,
+    body[data-tab="watchlist"] aside.sidebar {
+        display: none !important;
+    }
+
+    /* News tab — when no stock is loaded, reveal the right aside
+       (market-news placeholder) and hide main. When a stock IS
+       loaded, just let the news section scroll. */
+    body[data-tab="news"]:not([data-view="stock"]) aside.sidebar {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    body[data-tab="news"]:not([data-view="stock"]) main {
+        display: none !important;
+    }
+
+    /* Movers tab — show only movers */
+    body[data-tab="movers"] aside.mobile-left-aside,
+    body[data-tab="movers"] #market-pulse-panel {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    body[data-tab="movers"] main,
+    body[data-tab="movers"] aside.sidebar {
+        display: none !important;
+    }
+
+    /* Portfolio tab — show only portfolio panel */
+    body[data-tab="portfolio"] aside.mobile-left-aside,
+    body[data-tab="portfolio"] #portfolio-panel {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    body[data-tab="portfolio"] #portfolio-panel {
+        padding-top: 16px;
+    }
+
+    body[data-tab="portfolio"] main,
+    body[data-tab="portfolio"] aside.sidebar {
+        display: none !important;
+    }
+
+    /* When #left-stock-panels is relocated into #chart-main on mobile,
+       display it as a block so it flows naturally below the chart. */
+    #chart-main>#left-stock-panels {
+        display: block !important;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--hair-strong);
+    }
+
+    /* Body should scroll naturally on mobile, not be height-locked */
+    html,
+    body {
+        height: auto !important;
+        overflow: auto !important;
+    }
+
+    /* Fixed header stack: nav → ticker → section nav → search.
+       Offsets derive from CSS vars at :root. */
+    nav.h-16 {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: var(--z-nav);
+        height: var(--nav-h) !important;
+    }
+
+    .ticker-strip {
+        position: fixed !important;
+        top: var(--nav-h);
+        left: 0;
+        right: 0;
+        z-index: var(--z-ticker);
+    }
+
+    .mobile-section-nav {
+        position: fixed !important;
+        top: calc(var(--nav-h) + var(--ticker-h));
+        left: 0;
+        right: 0;
+        z-index: var(--z-chips);
+    }
+
+    .terminal-search-wrap {
+        position: fixed !important;
+        top: calc(var(--nav-h) + var(--ticker-h) + var(--chips-h));
+        left: 0;
+        right: 0;
+        z-index: var(--z-search);
+    }
+
+    .content-stage {
+        margin-top: var(--header-default);
+    }
+
+    /* Stock view — hide ticker, search, chip nav; keep navbar */
+    body[data-view="stock"] .ticker-strip,
+    body[data-view="stock"] .mobile-section-nav,
+    body[data-view="stock"] .terminal-search-wrap {
+        display: none !important;
+    }
+
+    body[data-view="stock"] .content-stage {
+        margin-top: var(--nav-h) !important;
+    }
+
+    /* Soften decorative overlays on small screens */
+    body::before {
+        opacity: .22 !important;
+    }
+
+    body::after {
+        display: none !important;
+    }
+
+    /* Drop the terminal frame chrome on phones — full-bleed cards.
+       Padding is handled by the consolidated rule below. */
+    .dashboard-stage-card {
+        border: 0;
+    }
+
+    /* Glass cards become full-bleed strips */
+    .glass {
+        border-left: 0 !important;
+        border-right: 0 !important;
+    }
+
+    /* Nav: tighter on mobile */
+    nav.h-16 {
+        height: 56px !important;
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+
+    /* Search field on mobile sits under the section nav (full-width) */
+    .terminal-search {
+        height: 40px;
+    }
+
+    #symbol-search {
+        font-size: 12px;
+    }
+
+    /* Hide expensive blur glows on mobile */
+    main .blur-\[120px\] {
+        display: none !important;
+    }
+
+    /* Hide admin link and CSV download on mobile */
+    #admin-link {
+        display: none !important;
+    }
+
+    #download-csv-container {
+        display: none !important;
+    }
+
+    /* Sector Performance tab — heatmap/grid/rotation don't fit a narrow
+       viewport; remove the pulse switcher's sectors icon so the other
+       four tabs (movers / gainers / losers / active) fill the row. */
+    #sectors-tab-btn {
+        display: none !important;
+    }
+
+    #market-sectors-dashboard {
+        display: none !important;
+    }
+
+    /* Right intelligence sidebar: full-bleed strip on mobile */
+    aside.sidebar {
+        padding: 16px !important;
+        border-left: 0 !important;
+        border-top: 1px solid var(--hair-strong) !important;
+        width: 100% !important;
+    }
+
+    /* GSE News placeholder — strip the inner px-2 so the news feed
+       aligns with the sidebar's 16px padding, matching the home and
+       stock views. */
+    #sidebar-placeholder {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    /* Watchlist, Movers & Portfolio panels — apply page padding directly */
+    #market-pulse-panel,
+    #watchlist-panel-container,
+    #portfolio-panel {
+        padding: 16px;
+    }
+
+    /* Tighten portfolio stat cards + buttons on mobile */
+    #portfolio-body .glass-card {
+        padding: 8px 12px !important;
+    }
+
+    #portfolio-body .stat-value,
+    #portfolio-body .text-lg,
+    #stock-portfolio-body .text-lg {
+        font-size: 17px !important;
+    }
+
+    #portfolio-body .text-\[8px\] {
+        font-size: 9px !important;
+    }
+
+    /* Sector exposure legend wraps tighter */
+    #portfolio-body .flex-wrap {
+        gap: 4px 10px !important;
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+     * HOME / MARKET — Accra Trader (mobile)
+     * Companion to the stock-detail redesign. Slim top chrome, underline
+     * section tabs, mono dateline hero, hairline-row stock lists,
+     * segmented pulse tabs, hairline news rows.
+     * ══════════════════════════════════════════════════════════════ */
+
+    /* Ticker tape — slim, mono, amber-highlighted numerics */
+    :root {
+        --ticker-h: 26px;
+        --search-h: 52px;
+    }
+
+    .ticker-strip {
+        height: var(--ticker-h);
+        font-size: 10px !important;
+        background: rgba(11, 10, 8, 0.92) !important;
+        border-bottom: 1px solid var(--hair) !important;
+    }
+
+    .ticker-strip .tape-track {
+        padding: 4px 0 !important;
+    }
+
+    .ticker-strip .tape-track>span>span {
+        padding: 0 12px !important;
+        border-right: 1px solid var(--hair);
+        letter-spacing: 0.03em;
+    }
+
+    .ticker-strip b {
+        font-weight: 700;
+    }
+
+    /* Mobile section nav → underlined tabs (same language as stock-detail
+       section nav). Full-bleed, hairline bottom, amber underline on active.
+       Replaces the old bordered-chip look. */
+    .mobile-section-nav {
+        display: flex;
+        gap: 0;
+        padding: 0;
+        background: rgba(11, 10, 8, 0.96);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--hair-strong);
+        overflow-x: auto;
+        scrollbar-width: none;
+        height: var(--chips-h);
+    }
+
+    .mobile-section-nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .mobile-section-nav::after {
+        display: none;
+    }
+
+    .mobile-tab {
+        flex: 1 1 0;
+        min-width: 0;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 0 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(244, 236, 216, 0.42);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        text-decoration: none;
+        transition: color .2s ease, border-color .2s ease;
+        white-space: nowrap;
+    }
+
+    .mobile-tab:hover,
+    .mobile-tab:focus {
+        color: rgba(244, 236, 216, 0.75);
+        border-color: transparent;
+    }
+
+    .mobile-tab[data-tab-active="true"] {
+        color: var(--paper);
+        border-bottom-color: var(--amber);
+        font-weight: 800;
+    }
+
+    .mobile-tab.inactive-chip {
+        background: transparent;
+        color: rgba(244, 236, 216, 0.42);
+        border: 0;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+    }
+
+    /* Search bar — tighter, amber focus ring */
+    .terminal-search {
+        height: 40px;
+    }
+
+    #symbol-search {
+        font-size: 12px;
+        background: rgba(244, 236, 216, 0.03) !important;
+        border: 1px solid var(--hair) !important;
+    }
+
+    /* #symbol-search:focus is handled universally in terminal.css — no
+       mobile-specific override needed; kept as a comment for discoverability. */
+    .terminal-search-wrap {
+        padding: 6px 12px !important;
+        background: rgba(11, 10, 8, 0.96) !important;
+        border-bottom: 1px solid var(--hair) !important;
+    }
+
+    /* ── Market dashboard: mono topbar ── */
+    .market-dashboard {
+        gap: 24px;
+    }
+
+    .market-topbar {
+        margin-bottom: 20px;
+        padding: 12px 0 14px;
+        border-bottom: 1px solid var(--hair-strong);
+        /* Paper-ledger double-rule: faint second line — echoes stock-detail. */
+        box-shadow: 0 3px 0 -2px var(--hair);
+    }
+
+    .market-topbar__title {
+        gap: 8px;
+    }
+
+    /* ── Unified section titles on mobile ──
+       Every section header across the mobile view renders with the same
+       typography as the Stock Insights card: JetBrains Mono, 12px,
+       dim-paper slate, 0.2em tracking, 700 weight, uppercase.
+       Overrides the sidebar-amber rule (line 150) — placed inside the
+       mobile media query, later in source order at equivalent
+       specificity, so the amber/10px styling is confined to desktop. */
+    /* .market-section-header h3/h4 + .market-briefing__card +
+       .market-briefing__summary are now handled universally in
+       terminal.css so the briefing looks identical on both breakpoints.
+       Mobile only adds the sidebar/section-header unification below. */
+    aside h3.text-xs.font-bold,
+    section h3.text-xs.font-bold,
+    aside h4.text-xs.font-bold,
+    section h4.text-xs.font-bold,
+    aside summary.text-xs.font-bold,
+    section summary.text-xs.font-bold,
+    #watchlist-panel h3,
+    #market-pulse-panel h3 {
+        font-family: 'IBM Plex Mono', monospace !important;
+        font-size: 12px !important;
+        font-weight: 700 !important;
+        color: rgba(244, 236, 216, 0.5) !important;
+        letter-spacing: 0.2em !important;
+        text-transform: uppercase !important;
+    }
+
+    /* ── Stock rows → hairline-divided list ──
+       Targets every rendered stock row (market dashboard, movers panel,
+       watchlist). Flattens the glass-card look into a clean tabular row. */
+    .market-stock-grid,
+    #market-pulse-items,
+    #watchlist-items {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0 !important;
+        grid-template-columns: none !important;
+    }
+
+    .market-stock-grid [data-stock-row-symbol],
+    #market-pulse-items [data-stock-row-symbol],
+    #watchlist-items [data-stock-row-symbol] {
+        background: transparent !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        border-bottom: 1px solid var(--hair) !important;
+        padding: 12px 2px !important;
+        box-shadow: none !important;
+        transform: none !important;
+    }
+
+    .market-stock-grid [data-stock-row-symbol]:hover,
+    #market-pulse-items [data-stock-row-symbol]:hover,
+    #watchlist-items [data-stock-row-symbol]:hover {
+        background: rgba(255, 177, 43, 0.04) !important;
+        transform: none !important;
+    }
+
+    .market-stock-grid [data-stock-row-symbol]:last-child,
+    #market-pulse-items [data-stock-row-symbol]:last-child,
+    #watchlist-items [data-stock-row-symbol]:last-child {
+        border-bottom: 0 !important;
+    }
+
+    /* Symbol + volume block (left) */
+    .market-stock-grid [data-stock-row-symbol]>div:first-child>p:first-child,
+    #market-pulse-items [data-stock-row-symbol]>div:first-child>p:first-child,
+    #watchlist-items [data-stock-row-symbol]>div:first-child>p:first-child {
+        font-family: inherit;
+        font-size: 15px !important;
+        font-weight: 800 !important;
+        letter-spacing: -0.01em;
+        color: var(--paper) !important;
+    }
+
+    .market-stock-grid [data-stock-row-symbol]>div:first-child>p:last-child,
+    #market-pulse-items [data-stock-row-symbol]>div:first-child>p:last-child,
+    #watchlist-items [data-stock-row-symbol]>div:first-child>p:last-child {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 9px !important;
+        letter-spacing: 0.2em !important;
+        color: rgba(244, 236, 216, 0.42) !important;
+        font-weight: 600 !important;
+    }
+
+    /* Price + delta block (right) */
+    .market-stock-grid [data-stock-row-symbol]>div.text-right>p:first-child,
+    #market-pulse-items [data-stock-row-symbol]>div.text-right>p:first-child,
+    #watchlist-items [data-stock-row-symbol]>div.text-right>p:first-child {
+        font-family: inherit;
+        font-size: 14px !important;
+        font-weight: 700 !important;
+        color: var(--paper) !important;
+    }
+
+    .market-stock-grid [data-stock-row-symbol]>div.text-right>p:last-child,
+    #market-pulse-items [data-stock-row-symbol]>div.text-right>p:last-child,
+    #watchlist-items [data-stock-row-symbol]>div.text-right>p:last-child {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+    }
+
+    /* Active-row marker intentionally disabled on mobile — watchlist and
+       movers render as flat hairline rows, matching each other. The
+       desktop rule at terminal.css:172 still applies on lg+ viewports. */
+
+    /* ── Stock insight cards (briefing) — hairline row list ── */
+    .market-insights-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0 !important;
+        grid-template-columns: none !important;
+        border-top: 1px solid var(--hair);
+    }
+
+    .market-insights-grid>.glass-card {
+        background: transparent !important;
+        border: 0 !important;
+        border-bottom: 1px solid var(--hair) !important;
+        border-radius: 0 !important;
+        padding: 14px 2px !important;
+    }
+
+    .market-insights-grid>.glass-card:last-child {
+        border-bottom: 0 !important;
+    }
+
+    /* Pulse tabs (Movers panel): bump to 44px touch targets on mobile. */
+    .pulse-tab-btn {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* ── News items → insight-card layout ──
+       Mirrors the Stock Insights block: bold source name + classification
+       badge on top row, mono time-ago meta, headline as the body paragraph.
+       Hairline-divided so the list reads as tabular rows. */
+    #market-news-feed,
+    #news-feed {
+        display: flex;
+        flex-direction: column;
+        gap: 0 !important;
+    }
+
+    .news-item {
+        background: transparent !important;
+        border: 0 !important;
+        border-bottom: 1px solid var(--hair) !important;
+        border-radius: 0 !important;
+        padding: 14px 2px !important;
+        box-shadow: none !important;
+    }
+
+    .news-item:last-child {
+        border-bottom: 0 !important;
+    }
+
+    .news-item:hover {
+        background: rgba(255, 177, 43, 0.03) !important;
+    }
+
+    .news-source {
+        font-family: inherit;
+        font-size: 15px !important;
+        font-weight: 800 !important;
+        letter-spacing: -0.01em !important;
+        color: var(--paper) !important;
+    }
+
+    .news-headline {
+        font-family: 'Inter', system-ui, sans-serif !important;
+        font-size: 12px !important;
+        line-height: 1.5 !important;
+        color: rgba(244, 236, 216, 0.7) !important;
+    }
+
+    /* Watchlist + Movers side panel titles are handled by the unified
+       section-title rule above — no bespoke typography here. */
+
+    /* ════════════════════════════════════════════════════════════════
+     * STOCK DETAIL — Accra Trader (mobile)
+     * Modern dark-trader UI translated into the amber-on-ink brand.
+     * Clean surfaces (grain dialed down), amber logo tile, pill range
+     * tabs, underlined section nav, row-list stats. Fraunces for hero
+     * numerics, JetBrains Mono for labels.
+     * ══════════════════════════════════════════════════════════════ */
+
+    /* Calm the paper grain on the stock view — more digital, less analog. */
+    body[data-view="stock"]::before {
+        opacity: 0.08 !important;
+    }
+
+    #price-summary {
+        margin-bottom: 12px;
+        gap: 0;
+    }
+
+    /* ── Top bar: back · "Stock Details" · actions ── */
+    .stock-header__topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 22px;
+    }
+
+    .stock-header__topbar-title {
+        flex: 1;
+        text-align: center;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.3em;
+        color: rgba(244, 236, 216, 0.55);
+    }
+
+    .stock-header__iconbtn {
+        width: 40px;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--hair-strong);
+        color: rgba(244, 236, 216, 0.7);
+        background: transparent;
+        transition: border-color .15s ease, color .15s ease;
+        flex-shrink: 0;
+    }
+
+    .stock-header__iconbtn:hover,
+    .stock-header__iconbtn:active {
+        border-color: var(--amber);
+        color: var(--amber);
+    }
+
+    .stock-header__iconbtn.copied {
+        border-color: var(--moss);
+        color: var(--moss);
+    }
+
+    .stock-header__actions {
+        display: flex;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    /* Normalise the pre-existing watchlist button into the iconbtn shape
+       when it sits inside the stock-detail actions row. Same treatment is
+       applied to the alerts bell so the three-button row (star, alerts,
+       share) reads as a consistent set on mobile. */
+    .stock-header__actions [data-watchlist-star],
+    .stock-header__actions [data-action="open-alert-rules-modal"] {
+        width: 40px;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--hair-strong);
+    }
+
+    .stock-header__actions [data-watchlist-star]:hover,
+    .stock-header__actions [data-action="open-alert-rules-modal"]:hover {
+        border-color: var(--amber);
+    }
+
+    /* ── Identity row: amber logo tile · ticker · price ── */
+    .stock-header__identity {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .stock-header__logo {
+        width: 44px;
+        height: 44px;
+        background: var(--amber);
+        color: var(--ink);
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 800;
+        font-size: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .stock-header__ticker {
+        min-width: 0;
+    }
+
+    .stock-header__ticker-name {
+        font-family: inherit;
+        font-weight: 800;
+        font-size: 20px;
+        line-height: 1.05;
+        color: var(--paper);
+        letter-spacing: -0.02em;
+        margin: 0;
+    }
+
+    .stock-header__ticker-sub {
+        display: block;
+        margin-top: 3px;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: rgba(244, 236, 216, 0.45);
+    }
+
+    .stock-header__price-block {
+        text-align: right;
+        min-width: 0;
+    }
+
+    /* Scope the mobile price override to the Accra Trader identity block
+       so it doesn't touch the desktop-only classic price header. */
+    .stock-header__price-block [data-count-target="main-price-display"],
+    .stock-header__price {
+        font-family: inherit;
+        font-size: 30px !important;
+        line-height: 1 !important;
+        font-weight: 800 !important;
+        letter-spacing: -0.035em;
+        color: var(--paper);
+        display: block;
+        white-space: nowrap;
+    }
+
+    .stock-header__price--empty {
+        opacity: 0.35;
+    }
+
+    .stock-header__delta {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-top: 6px;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+    }
+
+    .stock-header__delta--up {
+        color: var(--moss);
+    }
+
+    .stock-header__delta--down {
+        color: var(--rust);
+    }
+
+    .stock-header__delta__arrow {
+        font-size: 10px;
+        line-height: 1;
+    }
+
+    .stock-header__delta__abs {
+        opacity: 0.7;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    /* Chart controls → discrete pills, matching the desktop styling.
+       Each pill keeps its own hairline border + square corners so the
+       row reads as individual range buttons, not a single segmented
+       control. 8 ranges still overflow a 360px viewport so the strip
+       keeps horizontal scroll; touch target stays ≥44×44 per WCAG. */
+    #chart-controls {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        scrollbar-width: none;
+        margin-bottom: 16px !important;
+        gap: 8px !important;
+        padding: 0 !important;
+        background: transparent;
+        border: 0;
+        justify-content: center !important;
+    }
+
+    #chart-controls::-webkit-scrollbar {
+        display: none;
+    }
+
+    #chart-controls .range-btn {
+        flex: 0 0 auto;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 10px 14px !important;
+        background: transparent;
+        color: rgba(244, 236, 216, 0.55);
+        border: 1px solid var(--hair);
+        border-radius: 2px;
+        letter-spacing: 0.18em;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #chart-controls .range-btn:hover {
+        color: var(--amber);
+        border-color: var(--amber);
+    }
+
+    #chart-controls .range-btn.active {
+        background: var(--amber) !important;
+        color: var(--ink) !important;
+        border-color: var(--amber) !important;
+        font-weight: 700 !important;
+    }
+
+    #chart-controls #last-updated-label,
+    #chart-controls>.ml-auto {
+        display: none !important;
+    }
+
+    /* Drop the two most redundant ranges on mobile so the remaining
+       six (1M · 6M · YTD · 1Y · 5Y · MAX) fit cleanly on a ~360px
+       viewport without horizontal scroll. 1D/5D are covered by the
+       live-price readout above the chart. Desktop keeps the full
+       8-pill strip. */
+    #chart-controls .range-btn[data-range="1D"],
+    #chart-controls .range-btn[data-range="5D"] {
+        display: none !important;
+    }
+
+    /* ── Section tab nav (below chart) ──
+       Sticks below the fixed top nav once scrolled past, so users can
+       switch tabs without scrolling back up. */
+    .stock-section-nav {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--hair-strong);
+        margin: 22px 0 14px;
+        padding: 0;
+        position: sticky;
+        top: var(--nav-h);
+        z-index: 40;
+        background: var(--ink);
+        /* Full-bleed: pull to the edges of main's 16px padding so the
+           underline indicator doesn't leave floating side-gaps. */
+        margin-left: -16px;
+        margin-right: -16px;
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .stock-section-tab {
+        flex: 1;
+        padding: 13px 4px;
+        text-align: center;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: rgba(244, 236, 216, 0.42);
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: color .2s ease, border-color .2s ease;
+        text-decoration: none;
+    }
+
+    .stock-section-tab:hover {
+        color: rgba(244, 236, 216, 0.7);
+    }
+
+    .stock-section-tab.active {
+        color: var(--paper);
+        border-bottom-color: var(--amber);
+    }
+
+    /* ── Section filtering driven by body[data-stock-tab] ──
+       overview → indicators + about (default)
+       intel    → oracle
+       news     → news (stock headlines) */
+    [data-stock-section] {
+        scroll-margin-top: calc(var(--nav-h) + 58px);
+    }
+
+    /* When a stock is selected, all four sections (indicators, about,
+       oracle, news) have been relocated into #left-stock-panels — the
+       right aside has nothing stock-specific left to show, so collapse
+       it entirely. The aside still shows for the non-stock News chip
+       (body[data-tab="news"]:not([data-view="stock"])) — that rule sits
+       earlier in the file and is unaffected. */
+    body[data-view="stock"] aside#news {
+        display: none !important;
+    }
+
+    /* Tab filters — each tab reveals exactly one "slice" of the four
+       relocated sections: */
+    /* Overview (implicit default when stock view activates before JS): indicators + about */
+    body[data-stock-tab="overview"] [data-stock-section="oracle"],
+    body[data-stock-tab="overview"] [data-stock-section="news"],
+    body[data-stock-tab="overview"] [data-stock-section="backtest"],
+    body[data-view="stock"]:not([data-stock-tab]) [data-stock-section="oracle"],
+    body[data-view="stock"]:not([data-stock-tab]) [data-stock-section="news"],
+    body[data-view="stock"]:not([data-stock-tab]) [data-stock-section="backtest"] {
+        display: none !important;
+    }
+
+    /* Intel: AI Oracle + Signal Backtest */
+    body[data-stock-tab="intel"] [data-stock-section="indicators"],
+    body[data-stock-tab="intel"] [data-stock-section="about"],
+    body[data-stock-tab="intel"] [data-stock-section="news"] {
+        display: none !important;
+    }
+
+    /* News: stock news only */
+    body[data-stock-tab="news"] [data-stock-section="indicators"],
+    body[data-stock-tab="news"] [data-stock-section="about"],
+    body[data-stock-tab="news"] [data-stock-section="oracle"],
+    body[data-stock-tab="news"] [data-stock-section="backtest"] {
+        display: none !important;
+    }
+
+    /* Kill the 24px `space-y-6` margin-top Tailwind puts on the anchor
+       span + subsequent sections. On Intel the visible oracle is the
+       4th child and would otherwise inherit 24px from the cascade; on
+       News the visible news is the 5th child with the same issue.
+       The backtest panel (Intel tab) keeps its own mt-6 so it sits
+       below the Oracle with the correct gap. */
+    body[data-stock-tab="intel"] #left-stock-panels>*,
+    body[data-stock-tab="news"] #left-stock-panels>* {
+        margin-top: 0 !important;
+    }
+
+    body[data-stock-tab="intel"] #backtest-panel {
+        margin-top: 24px !important;
+    }
+
+    /* Chart container fills the remaining space.
+       overflow:visible lets the sticky section-nav attach to the body
+       scroll context on mobile (the desktop overflow-y:auto would
+       otherwise create an internal scroll container that traps it). */
+    #chart-main {
+        padding-bottom: 0;
+        overflow: visible !important;
+    }
+
+    #chart-container {
+        height: 380px;
+        width: 100%;
+        border-left: 0;
+        border-right: 0;
+        touch-action: pan-y;
+    }
+
+    #chart-container * {
+        touch-action: pan-y;
+    }
+
+    /* Stock view — chart goes full-bleed, escaping main's 16px padding
+       so it stretches edge-to-edge while the text content keeps its
+       breathing room. */
+    body[data-view="stock"] #chart-container {
+        margin-left: -16px;
+        margin-right: -16px;
+        width: calc(100% + 32px);
+    }
+
+    /* Mobile — drop dashboard card inner padding and use a consistent
+       16px outer padding on main, matching the news sidebar and the
+       watchlist/movers panels so every section shares the same
+       breathing room on both home and stock views.
+       The !important is needed to beat styles.css's global
+       `.dashboard-stage-card { padding: 1rem !important; }` rule. */
+    .dashboard-stage-card {
+        padding: 0 !important;
+    }
+
+    main {
+        padding: 16px !important;
+    }
+
+    /* Hide the Compare-to widget on mobile */
+    #comparables-widget {
+        display: none !important;
+    }
+
+    /* Compare-to peer cards on mobile use the movers row style. */
+    #comparables-container:has(.peer-card-mobile) {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        overflow: visible;
+        padding: 0;
+    }
+
+    #comparables-container .peer-card-mobile {
+        width: auto;
+        min-width: 0;
+    }
+
+    /* ── Key stats → 2×2 grid (single container, hairline dividers) ──
+       Replaces the desktop 4-card glass grid with a single bordered
+       block on mobile. Four cells laid out 2×2; interior hairlines
+       (right on col-1, bottom on row-1) simulate a divided stat sheet.
+       Label sits on top (10px uppercase mono), value drops bold below
+       — matches the reference's dense stat-row rhythm. */
+    #tech-stats {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 0 !important;
+        border: 1px solid var(--hair-strong) !important;
+        background: rgba(16, 14, 10, 0.35) !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+    }
+
+    #tech-stats>.stat-cell {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 6px !important;
+        padding: 14px 16px !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        min-height: 76px;
+    }
+
+    /* Interior hairlines: right border on the left column (odd children),
+       bottom border on the first row (children 1 & 2). */
+    #tech-stats>.stat-cell:nth-child(2n-1) {
+        border-right: 1px solid var(--hair) !important;
+    }
+
+    #tech-stats>.stat-cell:nth-child(-n+2) {
+        border-bottom: 1px solid var(--hair) !important;
+    }
+
+    /* .glow-content wraps label + value; display:contents promotes them
+       into the cell's flex column directly (label top, value below). */
+    #tech-stats .glow-content {
+        display: contents;
+    }
+
+    /* Mute the blue hover-glow pseudo — the grid doesn't need it. */
+    #tech-stats .glow-surface::before {
+        display: none;
+    }
+
+    #tech-stats .stat-label {
+        margin: 0 !important;
+        opacity: 1 !important;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.22em !important;
+        color: rgba(244, 236, 216, 0.5) !important;
+        text-transform: uppercase;
+    }
+
+    /* Stat values: big Fraunces numeric. Colour still falls out of the
+       inline Tailwind class on each cell (paper for High/Low via
+       text-white/90, amber for Volatility via text-blue-400 → mapped at
+       terminal.css:114, and the live market colour on the Status cell
+       via its dynamic text-emerald/amber/rose class). */
+    /* #tech-stats .stat-value {
+        text-align: left;
+        font-family: inherit;
+        font-weight: 800 !important;
+        font-size: 20px !important;
+        line-height: 1 !important;
+        letter-spacing: -0.015em;
+    } */
+    /* Status value reads longer than the numeric cells — bring the size
+       down a notch so "Pre-Opening" / "Closed" sit comfortably. */
+    /* #tech-stats .stat-value--status {
+        font-size: 17px !important;
+    } */
+
+    /* .truncate {
+        font-size: 17px !important;
+    } */
+
+    /* #tech-stats .stat-value {
+        font-size: 17px !important;
+    } */
+
+    .figures {
+        font-size: 17px !important;
+    }
+
+    /* Touch devices can't hover — kill the dashed Volatility underline
+       (and the hidden tooltip popup itself) on mobile. */
+    #tech-stats .has-tooltip,
+    #backtest-body .has-tooltip {
+        border-bottom: 0 !important;
+        cursor: default;
+    }
+
+    #tech-stats .tooltip,
+    #backtest-body .tooltip {
+        display: none !important;
+    }
+
+    /* ── Section rhythm below the chart ── */
+    #chart-main>#left-stock-panels {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+    }
+
+    #left-stock-panels>section+section {
+        margin-top: 28px;
+    }
+
+    #sidebar-content {
+        gap: 28px !important;
+    }
+
+    #left-stock-panels section>h3 {
+        margin-bottom: 12px !important;
+    }
+
+    /* Connection-lost overlay */
+    #connectivity-overlay>div {
+        padding: 24px;
+    }
+
+    /* Disable collapse chevrons + interaction on mobile — all sections
+       are always expanded under their respective tabs. */
+    [data-action="toggle-collapse"] .collapse-chevron {
+        display: none !important;
+    }
+
+    [data-action="toggle-collapse"] {
+        cursor: default;
+        pointer-events: none;
+    }
+}

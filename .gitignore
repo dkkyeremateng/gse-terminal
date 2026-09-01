@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+/server
+*.exe
+
+# Runtime logs (contain API keys in request URLs)
+logs/
+*.log
+
+# Local env
+.env
+.env.local
+*.local
+
+# Real secrets — commit k8s/secrets.example.yaml instead
+k8s/secrets.yaml
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/

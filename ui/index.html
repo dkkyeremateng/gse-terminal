@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSE Terminal — The Ghana Stock Exchange, on the wire.</title>
+    <meta name="description" content="A modern data terminal for the Ghana Stock Exchange. Live prices, AI-powered insights, watchlists, and a developer API.">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <!-- PWA install surface — same set of meta tags as terminal.html so a
+         user installing from the landing page gets the same iOS/Android
+         standalone treatment as one installing from /terminal. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b0a08">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="GSE Terminal">
+    <link rel="apple-touch-icon" href="/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module" src="/static/app.js"></script>
+    <style>
+        :root {
+            --ink: #0b0a08;
+            --paper: #f4ecd8;
+            --cream: #e9dfc4;
+            --amber: #ffb12b;
+            --amber-deep: #c97a06;
+            --rust: #b23a17;
+            --moss: #4a6b2a;
+            --ghana-red: #ce1126;
+            --ghana-gold: #fcd116;
+            --ghana-green: #006b3f;
+            --hair: rgba(244,236,216,0.14);
+            --hair-strong: rgba(244,236,216,0.28);
+        }
+        html, body { background: var(--ink); color: var(--paper); }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-feature-settings: "ss01","cv11","tnum";
+            -webkit-font-smoothing: antialiased;
+        }
+        .serif { font-family: 'Inter', serif; font-optical-sizing: auto; font-variation-settings: "SOFT" 30, "WONK" 1; }
+        .mono  { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-feature-settings: "tnum","zero"; }
+
+        /* Shared masthead mark — identical across landing, terminal, admin */
+        .gse-mark { width: 36px; height: 36px; border: 1px solid var(--amber); display: flex; align-items: center; justify-content: center; position: relative; }
+        .gse-mark > div { width: 20px; height: 20px; background: var(--amber); }
+        .gse-mark::after { content: ""; position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; background: var(--ghana-red); }
+
+        /* Paper grain + scanlines */
+        .grain::before {
+            content:""; position:fixed; inset:0; pointer-events:none; z-index:60;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 .92  0 0 0 0 .78  0 0 0 .08 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+            mix-blend-mode: overlay; opacity:.55;
+        }
+        .scan { background-image: repeating-linear-gradient(to bottom, transparent 0 3px, rgba(255,255,255,.012) 3px 4px); }
+
+        /* Halftone radial */
+        .halftone {
+            background-image: radial-gradient(circle at 1px 1px, rgba(255,177,43,.35) 1px, transparent 1.4px);
+            background-size: 9px 9px;
+        }
+
+        /* Ticker */
+        @keyframes tape { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .tape-track { animation: tape 80s linear infinite; }
+
+        /* Cursor blink */
+        @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+        .blink { animation: blink 1.05s steps(1) infinite; }
+
+        /* Pulse dot */
+        @keyframes pip { 0%{box-shadow:0 0 0 0 rgba(255,177,43,.55)} 70%{box-shadow:0 0 0 8px rgba(255,177,43,0)} 100%{box-shadow:0 0 0 0 rgba(255,177,43,0)} }
+        .pip { animation: pip 1.8s ease-out infinite; }
+
+        /* Page reveal */
+        @keyframes rise { from { opacity:0; transform: translateY(14px); } to { opacity:1; transform:none; } }
+        .rise { opacity:0; animation: rise .9s cubic-bezier(.2,.7,.2,1) forwards; }
+
+        /* Stock spark */
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+        .spark path { stroke-dasharray: 600; stroke-dashoffset: 600; animation: draw 2.6s ease-out .6s forwards; }
+
+        /* Newspaper rule */
+        .rule-double { border-top: 1px solid var(--hair-strong); box-shadow: 0 3px 0 -2px var(--hair-strong); }
+
+        /* Link underline */
+        .ulink { background-image: linear-gradient(currentColor,currentColor); background-size: 100% 1px; background-position: 0 100%; background-repeat: no-repeat; }
+
+        /* Selection */
+        ::selection { background: var(--amber); color: var(--ink); }
+
+        /* Custom checkbox-y bullets */
+        .marker::before { content:"§"; color: var(--amber); margin-right:.4rem; font-family:'Inter',serif; }
+
+        .stamp {
+            border: 1.5px solid var(--amber);
+            color: var(--amber);
+            transform: rotate(-4deg);
+            box-shadow: inset 0 0 0 2px rgba(255,177,43,.15);
+        }
+
+        .vrule > * + * { border-left: 1px solid var(--hair); }
+
+        /* Big number flicker on load */
+        @keyframes flick { 0%{opacity:.2} 10%{opacity:1} 12%{opacity:.3} 16%{opacity:1} 100%{opacity:1} }
+        .flick { animation: flick 1.4s steps(1) 1; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-thumb { background: rgba(244,236,216,.12); }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(244,236,216,.22); }
+    </style>
+</head>
+<body class="grain min-h-screen scan">
+
+    <!-- Sticky group: marquee + masthead pin together so the entire header
+         strip travels as one unit while the page scrolls. -->
+    <div class="sticky top-0 z-[60]">
+    <!-- ============ TOP MARQUEE ============ -->
+    <div class="border-b border-[var(--hair-strong)] bg-[var(--ink)]/85 backdrop-blur-md">
+        <div class="flex items-stretch">
+            <div class="hidden md:flex items-center gap-2 px-4 border-r border-[var(--hair)] mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/60">
+                <span class="w-1.5 h-1.5 rounded-full bg-[var(--amber)] pip"></span>
+                Tape · Accra
+            </div>
+            <div class="relative overflow-hidden flex-1">
+                <div class="tape-track flex whitespace-nowrap mono text-[12px] py-2">
+                    {{/* Render the latest-traded ticker rows server-side from
+                         the equities table. Duplicated once so the marquee
+                         scroll loops seamlessly. */}}
+                    {{if .Ticker}}
+                    {{range $pass := .TickerPasses}}
+                    <span class="flex items-center" {{if $pass}} aria-hidden="true" {{end}}>
+                        {{range $.Ticker}}
+                        <span class="px-5">{{.Symbol}} <b class="text-[var(--amber)]">{{printf "%.2f" .LastPrice}}</b> {{if gt .PercentChange 0.0}}<span class="text-[var(--moss)]">▲ {{printf "%.2f" .PercentChange}}%</span>{{else if lt .PercentChange 0.0}}<span class="text-[var(--rust)]">▼ {{printf "%.2f" (neg .PercentChange)}}%</span>{{else}}<span class="text-[var(--paper)]/40">→ 0.00%</span>{{end}}</span>
+                        {{end}}
+                    </span>
+                    {{end}}
+                    {{else}}
+                    <span class="flex items-center px-5 text-[var(--paper)]/40">Awaiting first data ingestion…</span>
+                    {{end}}
+                </div>
+                <!-- Edge fades -->
+                <div class="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-[var(--ink)] to-transparent"></div>
+                <div class="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-[var(--ink)] to-transparent"></div>
+            </div>
+            <div class="hidden lg:flex items-center gap-3 px-4 border-l border-[var(--hair)] mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/60">
+                <span>GMT 00:00</span><span class="text-[var(--amber)]">●</span><span>OPEN</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ NAV / MASTHEAD ============ -->
+    <header class="border-b border-[var(--hair-strong)] bg-[var(--ink)]/85 backdrop-blur-md">
+        <div class="max-w-[1400px] mx-auto px-6 lg:px-10 py-5 flex items-center justify-between gap-6">
+            <a href="/" class="flex items-center gap-4">
+                <div class="gse-mark"><div></div></div>
+                <div class="leading-none">
+                    <div class="serif text-2xl font-black tracking-tight">GSE<span class="text-[var(--amber)]">·</span>Terminal</div>
+                    <div class="mono text-[9px] uppercase tracking-[0.28em] text-[var(--paper)]/50 mt-1">Vol. I &nbsp;·&nbsp; Issue Nº 001 &nbsp;·&nbsp; Accra Edition</div>
+                </div>
+            </a>
+
+            <nav class="hidden md:flex items-center gap-8 mono text-[11px] uppercase tracking-[0.2em] text-[var(--paper)]/70">
+                <a href="#dispatch" class="hover:text-[var(--amber)] transition">Dispatch</a>
+                <a href="#instruments" class="hover:text-[var(--amber)] transition">Instruments</a>
+                <a href="#oracle" class="hover:text-[var(--amber)] transition">Oracle</a>
+                <a href="/developers" class="hover:text-[var(--amber)] transition">API</a>
+            </nav>
+
+            <div class="flex items-center gap-2">
+                {{if .IsAuthenticated}}
+                <a href="/terminal" class="group inline-flex items-center gap-2 mono text-[11px] uppercase tracking-[0.2em] px-4 py-2.5 bg-[var(--amber)] text-[var(--ink)] hover:bg-[var(--paper)] transition">
+                    Open Terminal
+                    <span class="group-hover:translate-x-0.5 transition">→</span>
+                </a>
+                {{else}}
+                <a href="/terminal" class="hidden sm:inline-block mono text-[11px] uppercase tracking-[0.2em] text-[var(--paper)]/70 hover:text-[var(--amber)] transition">Try as guest</a>
+                <a href="/login" class="hidden sm:inline-block mono text-[11px] uppercase tracking-[0.2em] text-[var(--paper)]/70 hover:text-[var(--amber)] transition px-3">Sign in</a>
+                <a href="/login" class="group inline-flex items-center gap-2 mono text-[11px] uppercase tracking-[0.2em] px-4 py-2.5 bg-[var(--amber)] text-[var(--ink)] hover:bg-[var(--paper)] transition">
+                    Subscribe
+                    <span class="group-hover:translate-x-0.5 transition">→</span>
+                </a>
+                {{end}}
+            </div>
+        </div>
+    </header>
+    </div><!-- /sticky group -->
+
+    <!-- ============ HERO / FRONT PAGE ============ -->
+    <section id="dispatch" class="border-b border-[var(--hair-strong)] relative overflow-hidden">
+        <!-- background halftone -->
+        <div class="absolute -right-24 top-0 w-[560px] h-[560px] halftone opacity-[.18] [mask-image:radial-gradient(closest-side,#000,transparent)]"></div>
+
+        <div class="max-w-[1400px] mx-auto px-6 lg:px-10 py-10 lg:py-14">
+            <!-- Dateline -->
+            <div class="rise flex flex-wrap items-center gap-4 mono text-[10px] uppercase tracking-[0.28em] text-[var(--paper)]/55 mb-8" style="animation-delay:.05s">
+                <span class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-[var(--amber)] pip"></span> Live wire</span>
+                <span class="text-[var(--paper)]/30">/</span>
+                <span>Accra · 5°33′N 0°12′W</span>
+                <span class="text-[var(--paper)]/30">/</span>
+                <span>The Ghana Stock Exchange, on the wire</span>
+            </div>
+
+            <div class="grid lg:grid-cols-12 gap-8 lg:gap-12">
+                <!-- Headline column -->
+                <div class="lg:col-span-8">
+                    <h1 class="rise serif font-black tracking-[-0.025em] leading-[0.92] text-[clamp(3rem,9vw,8.5rem)]" style="animation-delay:.1s">
+                        The Exchange,<br>
+                        <span class="italic font-light">decoded&nbsp;</span>
+                        <span class="relative inline-block">
+                            <span class="text-[var(--amber)]">in real time.</span>
+                            <svg class="absolute -bottom-2 left-0 w-full" height="14" viewBox="0 0 400 14" preserveAspectRatio="none">
+                                <path d="M2 10 Q 100 2, 200 8 T 398 6" fill="none" stroke="currentColor" stroke-width="2" class="text-[var(--amber)]"/>
+                            </svg>
+                        </span>
+                    </h1>
+
+                    <div class="rise mt-10 grid sm:grid-cols-[auto_1fr] gap-6 max-w-3xl" style="animation-delay:.25s">
+                        <div class="serif text-[var(--amber)] text-6xl leading-none">¶</div>
+                        <p class="text-[var(--paper)]/80 text-lg leading-[1.55] serif font-light">
+                            Live prices for every listed equity. An AI oracle that fuses RSI, ATR and sentiment.
+                            Watchlists, four-way comparison, and a developer-grade <span class="italic">/v1</span> API —
+                            all under one terminal that finally treats the GSE like first-class data.
+                        </p>
+                    </div>
+
+                    <!-- CTAs -->
+                    <div class="rise mt-10 flex flex-wrap items-center gap-4" style="animation-delay:.4s">
+                        <a href="/terminal" class="group relative inline-flex items-center gap-3 px-7 py-4 bg-[var(--amber)] text-[var(--ink)] mono text-[12px] uppercase tracking-[0.22em] font-bold">
+                            <span class="w-1.5 h-1.5 bg-[var(--ink)] rounded-full"></span>
+                            Open the Terminal
+                            <span class="group-hover:translate-x-1 transition">→</span>
+                            <span class="absolute -bottom-1 -right-1 w-full h-full border border-[var(--amber)] -z-0 pointer-events-none"></span>
+                        </a>
+                        {{if not .IsAuthenticated}}
+                        <a href="/login" class="inline-flex items-center gap-2 mono text-[12px] uppercase tracking-[0.22em] text-[var(--paper)]/80 hover:text-[var(--amber)] transition">
+                            <span class="ulink">Establish credentials</span> ↗
+                        </a>
+                        {{end}}
+                    </div>
+                </div>
+
+                <!-- Quote card / market readout -->
+                <aside class="lg:col-span-4 rise" style="animation-delay:.5s">
+                    <div class="border border-[var(--hair-strong)] bg-[var(--ink)]/40 relative">
+                        <!-- header bar -->
+                        <div class="flex items-center justify-between px-4 py-2 border-b border-[var(--hair)] mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/55">
+                            <span class="flex items-center gap-2"><span class="w-1.5 h-1.5 bg-[var(--moss)] rounded-full"></span> GSE Composite</span>
+                            <span>· 14:32:08 GMT</span>
+                        </div>
+
+                        <div class="p-5">
+                            <div class="flex items-baseline gap-3">
+                                <div class="serif text-[64px] leading-none font-black text-[var(--amber)] flick mono" style="font-family:'Inter',serif">3,418<span class="text-[var(--paper)]/40">.</span>72</div>
+                            </div>
+                            <div class="mono text-xs mt-2 flex items-center gap-3">
+                                <span class="text-[var(--moss)]">▲ +24.86</span>
+                                <span class="text-[var(--moss)]">+0.73%</span>
+                                <span class="text-[var(--paper)]/40">· session</span>
+                            </div>
+
+                            <!-- sparkline -->
+                            <svg class="spark mt-5 w-full h-24" viewBox="0 0 400 100" preserveAspectRatio="none">
+                                <defs>
+                                    <linearGradient id="sg" x1="0" x2="0" y1="0" y2="1">
+                                        <stop offset="0%" stop-color="#ffb12b" stop-opacity=".35"/>
+                                        <stop offset="100%" stop-color="#ffb12b" stop-opacity="0"/>
+                                    </linearGradient>
+                                </defs>
+                                <path d="M0,72 L20,68 L40,74 L60,60 L80,62 L100,52 L120,58 L140,44 L160,48 L180,38 L200,42 L220,34 L240,40 L260,28 L280,32 L300,22 L320,30 L340,18 L360,24 L380,14 L400,20 L400,100 L0,100 Z" fill="url(#sg)" stroke="none"/>
+                                <path d="M0,72 L20,68 L40,74 L60,60 L80,62 L100,52 L120,58 L140,44 L160,48 L180,38 L200,42 L220,34 L240,40 L260,28 L280,32 L300,22 L320,30 L340,18 L360,24 L380,14 L400,20" fill="none" stroke="#ffb12b" stroke-width="1.6" stroke-linejoin="round"/>
+                            </svg>
+
+                            <!-- mini stats -->
+                            <div class="grid grid-cols-3 mt-5 vrule">
+                                <div class="px-3 first:pl-0">
+                                    <div class="mono text-[9px] uppercase tracking-[0.2em] text-[var(--paper)]/45">High</div>
+                                    <div class="mono text-sm mt-1">3,422.04</div>
+                                </div>
+                                <div class="px-3">
+                                    <div class="mono text-[9px] uppercase tracking-[0.2em] text-[var(--paper)]/45">Low</div>
+                                    <div class="mono text-sm mt-1">3,389.51</div>
+                                </div>
+                                <div class="px-3">
+                                    <div class="mono text-[9px] uppercase tracking-[0.2em] text-[var(--paper)]/45">Vol</div>
+                                    <div class="mono text-sm mt-1">2.4M</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- corner stamp -->
+                        <div class="absolute -top-3 -right-3 stamp px-2.5 py-1 mono text-[9px] uppercase tracking-[0.22em] bg-[var(--ink)]">Live · Acc</div>
+                    </div>
+
+                    <!-- footnote -->
+                    <p class="mt-3 mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/40 text-right">
+                        Demo readout · subject to drift
+                    </p>
+                </aside>
+            </div>
+        </div>
+
+        <!-- bottom rule with serial -->
+        <div class="max-w-[1400px] mx-auto px-6 lg:px-10 pb-4 flex items-center justify-between mono text-[9px] uppercase tracking-[0.28em] text-[var(--paper)]/40">
+            <span>§ I — Front Matter</span>
+            <span>Continued overleaf →</span>
+        </div>
+    </section>
+
+    <!-- ============ INSTRUMENTS / FEATURES ============ -->
+    <section id="instruments" class="border-b border-[var(--hair-strong)]">
+        <div class="max-w-[1400px] mx-auto px-6 lg:px-10 py-14">
+
+            <!-- section head -->
+            <div class="flex items-end justify-between gap-6 mb-10">
+                <div>
+                    <div class="mono text-[10px] uppercase tracking-[0.28em] text-[var(--amber)]">§ II — Instruments</div>
+                    <h2 class="serif text-5xl lg:text-6xl font-black tracking-tight mt-3 leading-none">
+                        Ten tools.<br><span class="italic font-light">One terminal.</span>
+                    </h2>
+                </div>
+                <div class="hidden md:block max-w-sm text-right text-[var(--paper)]/60 leading-relaxed">
+                    A purpose-built workspace for analysts, retail traders and the curious — engineered for the
+                    rhythm of the Accra session.
+                </div>
+            </div>
+
+            <!-- asymmetric feature grid -->
+            <div class="grid grid-cols-12 gap-px bg-[var(--hair-strong)] border border-[var(--hair-strong)]">
+
+                <!-- 1. Live charts (large) -->
+                <article class="col-span-12 md:col-span-7 bg-[var(--ink)] p-7 lg:p-9 relative group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 01</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/charts</div>
+                    </div>
+                    <h3 class="serif text-4xl lg:text-5xl font-black mt-4 leading-[0.95]">Live charts,<br><span class="italic font-light">cut to the second.</span></h3>
+                    <p class="mt-4 text-[var(--paper)]/65 max-w-md leading-relaxed">OHLC candlesticks, VWAP overlay and ranges from 1D to 5Y — rendered without compromise.</p>
+
+                    <!-- decorative chart -->
+                    <svg class="mt-6 w-full h-40" viewBox="0 0 600 160" preserveAspectRatio="none">
+                        <g stroke="rgba(244,236,216,.08)" stroke-width="1">
+                            <line x1="0" y1="40" x2="600" y2="40"/>
+                            <line x1="0" y1="80" x2="600" y2="80"/>
+                            <line x1="0" y1="120" x2="600" y2="120"/>
+                        </g>
+                        <g class="text-[var(--amber)]">
+                        <!-- candles -->
+                        <g stroke="currentColor" stroke-width="1">
+                            <line x1="20" y1="60" x2="20" y2="110"/><rect x="14" y="70" width="12" height="30" fill="currentColor"/>
+                            <line x1="50" y1="50" x2="50" y2="115"/><rect x="44" y="60" width="12" height="40" fill="currentColor"/>
+                            <line x1="80" y1="55" x2="80" y2="100"/><rect x="74" y="65" width="12" height="20" fill="none"/>
+                            <line x1="110" y1="45" x2="110" y2="105"/><rect x="104" y="55" width="12" height="35" fill="currentColor"/>
+                            <line x1="140" y1="40" x2="140" y2="95"/><rect x="134" y="50" width="12" height="25" fill="none"/>
+                            <line x1="170" y1="30" x2="170" y2="85"/><rect x="164" y="40" width="12" height="30" fill="currentColor"/>
+                            <line x1="200" y1="35" x2="200" y2="80"/><rect x="194" y="45" width="12" height="20" fill="none"/>
+                            <line x1="230" y1="25" x2="230" y2="75"/><rect x="224" y="35" width="12" height="25" fill="currentColor"/>
+                            <line x1="260" y1="20" x2="260" y2="65"/><rect x="254" y="30" width="12" height="20" fill="currentColor"/>
+                            <line x1="290" y1="28" x2="290" y2="70"/><rect x="284" y="38" width="12" height="22" fill="none"/>
+                            <line x1="320" y1="18" x2="320" y2="55"/><rect x="314" y="28" width="12" height="18" fill="currentColor"/>
+                            <line x1="350" y1="22" x2="350" y2="60"/><rect x="344" y="32" width="12" height="20" fill="currentColor"/>
+                            <line x1="380" y1="15" x2="380" y2="50"/><rect x="374" y="25" width="12" height="18" fill="currentColor"/>
+                            <line x1="410" y1="20" x2="410" y2="55"/><rect x="404" y="30" width="12" height="18" fill="none"/>
+                            <line x1="440" y1="12" x2="440" y2="48"/><rect x="434" y="22" width="12" height="18" fill="currentColor"/>
+                            <line x1="470" y1="18" x2="470" y2="42"/><rect x="464" y="22" width="12" height="14" fill="currentColor"/>
+                            <line x1="500" y1="10" x2="500" y2="38"/><rect x="494" y="14" width="12" height="18" fill="currentColor"/>
+                            <line x1="530" y1="14" x2="530" y2="44"/><rect x="524" y="20" width="12" height="18" fill="none"/>
+                            <line x1="560" y1="8" x2="560" y2="32"/><rect x="554" y="12" width="12" height="14" fill="currentColor"/>
+                        </g>
+                        </g>
+                    </svg>
+                </article>
+
+                <!-- 2. AI Oracle -->
+                <article class="col-span-12 md:col-span-5 bg-[var(--ink)] p-7 lg:p-9 relative group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 02</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/oracle</div>
+                    </div>
+                    <h3 class="serif text-4xl font-black mt-4 leading-[0.95]">The AI<br><span class="italic font-light">Oracle.</span></h3>
+                    <p class="mt-4 text-[var(--paper)]/65 leading-relaxed">RSI, ATR, momentum and news sentiment — fused into a single, opinionated read.</p>
+
+                    <div class="mt-6 border-t border-[var(--hair)] pt-4 space-y-2 mono text-[11px]">
+                        <div class="flex justify-between"><span class="text-[var(--paper)]/50">RSI(14)</span><span class="text-[var(--amber)]">62.4 ↗</span></div>
+                        <div class="flex justify-between"><span class="text-[var(--paper)]/50">ATR(14)</span><span>0.084</span></div>
+                        <div class="flex justify-between"><span class="text-[var(--paper)]/50">Sentiment</span><span class="text-[var(--moss)]">+0.71</span></div>
+                        <div class="flex justify-between border-t border-dashed border-[var(--hair)] pt-2"><span class="text-[var(--paper)]/50">Verdict</span><span class="text-[var(--amber)] uppercase tracking-wider">Constructive</span></div>
+                    </div>
+                </article>
+
+                <!-- 3. Watchlists -->
+                <article class="col-span-12 md:col-span-4 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 03</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/watch</div>
+                    </div>
+                    <h3 class="serif text-3xl font-black mt-4 leading-[0.95]">Watchlists,<br><span class="italic font-light">pinned.</span></h3>
+                    <p class="mt-3 text-[var(--paper)]/65 leading-relaxed text-sm">Track the names that matter. Star a ticker and it follows you across every view.</p>
+                    <ul class="mt-5 space-y-1 mono text-[11px]">
+                        <li class="flex justify-between"><span>★ MTNGH</span><span class="text-[var(--moss)]">+1.43%</span></li>
+                        <li class="flex justify-between"><span>★ GCB</span><span class="text-[var(--moss)]">+0.79%</span></li>
+                        <li class="flex justify-between"><span>★ FML</span><span class="text-[var(--moss)]">+2.31%</span></li>
+                        <li class="flex justify-between text-[var(--paper)]/40">+ add symbol</li>
+                    </ul>
+                </article>
+
+                <!-- 4. Comparison -->
+                <article class="col-span-12 md:col-span-4 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 04</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/compare</div>
+                    </div>
+                    <h3 class="serif text-3xl font-black mt-4 leading-[0.95]">Four-way<br><span class="italic font-light">overlay.</span></h3>
+                    <p class="mt-3 text-[var(--paper)]/65 leading-relaxed text-sm">Stack up to four equities and read them on a single normalised axis.</p>
+                    <svg class="mt-5 w-full h-20" viewBox="0 0 200 60">
+                        <path d="M0,40 C40,20 80,50 120,30 S180,10 200,20" fill="none" stroke="#ffb12b" stroke-width="1.5"/>
+                        <path d="M0,30 C40,45 80,15 120,40 S180,30 200,15" fill="none" stroke="#ce1126" stroke-width="1.5"/>
+                        <path d="M0,50 C40,35 80,40 120,20 S180,40 200,30" fill="none" stroke="#4a6b2a" stroke-width="1.5"/>
+                        <path d="M0,20 C40,30 80,25 120,45 S180,20 200,40" fill="none" stroke="#e9dfc4" stroke-width="1.5" stroke-dasharray="3 3"/>
+                    </svg>
+                </article>
+
+                <!-- 5. Developer API -->
+                <a href="/developers" class="col-span-12 md:col-span-4 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition block">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 05</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/v1</div>
+                    </div>
+                    <h3 class="serif text-3xl font-black mt-4 leading-[0.95]">Developer<br><span class="italic font-light">API.</span></h3>
+                    <p class="mt-3 text-[var(--paper)]/65 leading-relaxed text-sm">Bearer-keyed, /v1 endpoints. JSON in, JSON out. <span class="text-[var(--amber)] group-hover:underline">Browse the reference →</span></p>
+                    <div class="mt-5 mono text-[10px] bg-black/40 border border-[var(--hair)] p-3 leading-relaxed">
+                        <div class="text-[var(--paper)]/40">$ curl -H "Authorization: Bearer …"</div>
+                        <div class="text-[var(--amber)]">&nbsp;&nbsp;https://gse.terminal/v1/history?symbol=MTNGH</div>
+                    </div>
+                </a>
+
+                <!-- 6. Alerts -->
+                <article class="col-span-12 md:col-span-4 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 06</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/alerts</div>
+                    </div>
+                    <h3 class="serif text-3xl font-black mt-4 leading-[0.95]">Watchlist<br><span class="italic font-light">alerts.</span></h3>
+                    <p class="mt-3 text-[var(--paper)]/65 leading-relaxed text-sm">Price, percent, RSI. The terminal pings the moment your rule fires — email and in-app, no polling.</p>
+                    <ul class="mt-5 space-y-1 mono text-[11px]">
+                        <li class="flex justify-between"><span>MTNGH &gt; 1.50</span><span class="text-[var(--moss)]">armed</span></li>
+                        <li class="flex justify-between"><span>ALW  &lt; 12.00</span><span class="text-[var(--moss)]">armed</span></li>
+                        <li class="flex justify-between"><span>GCB  RSI &lt; 30</span><span class="text-[var(--amber)]">fired ▲</span></li>
+                    </ul>
+                </article>
+
+                <!-- 7. Sectors -->
+                <article class="col-span-12 md:col-span-4 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 07</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/sectors</div>
+                    </div>
+                    <h3 class="serif text-3xl font-black mt-4 leading-[0.95]">Sector<br><span class="italic font-light">rotation.</span></h3>
+                    <p class="mt-3 text-[var(--paper)]/65 leading-relaxed text-sm">Turnover-weighted heatmap, leader cards and a rotation chart — where the flows are going, at a glance.</p>
+                    <!-- 4×3 heatmap sketch; greens + rusts in a pleasing asymmetry. -->
+                    <div class="mt-5 grid grid-cols-4 gap-1">
+                        <div class="h-6" style="background:rgba(74,107,42,0.8)"></div>
+                        <div class="h-6" style="background:rgba(74,107,42,0.55)"></div>
+                        <div class="h-6" style="background:rgba(178,58,23,0.4)"></div>
+                        <div class="h-6" style="background:rgba(74,107,42,0.3)"></div>
+                        <div class="h-6" style="background:rgba(74,107,42,0.65)"></div>
+                        <div class="h-6" style="background:rgba(178,58,23,0.75)"></div>
+                        <div class="h-6" style="background:rgba(74,107,42,0.45)"></div>
+                        <div class="h-6" style="background:rgba(178,58,23,0.25)"></div>
+                        <div class="h-6" style="background:rgba(178,58,23,0.55)"></div>
+                        <div class="h-6" style="background:rgba(74,107,42,0.25)"></div>
+                        <div class="h-6" style="background:rgba(74,107,42,0.7)"></div>
+                        <div class="h-6" style="background:rgba(178,58,23,0.35)"></div>
+                    </div>
+                </article>
+
+                <!-- 8. Daily briefing -->
+                <article class="col-span-12 md:col-span-4 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="flex items-start justify-between">
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 08</div>
+                        <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/briefing</div>
+                    </div>
+                    <h3 class="serif text-3xl font-black mt-4 leading-[0.95]">Daily<br><span class="italic font-light">briefing.</span></h3>
+                    <p class="mt-3 text-[var(--paper)]/65 leading-relaxed text-sm">An editor's cut of the session — top actives, sector drift, sentiment read. Generated nightly, waiting at open.</p>
+                    <div class="mt-5 border-l-2 border-[var(--amber)]/50 pl-3 serif italic text-[13px] leading-relaxed text-[var(--paper)]/70">
+                        "Financials extended a three-session advance as MTNGH tagged a fresh YTD high on thin volume…"
+                    </div>
+                </article>
+
+                <!-- 9. Natural language query (full bleed) -->
+                <article class="col-span-12 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="grid md:grid-cols-[1fr_auto] gap-6 items-center">
+                        <div>
+                            <div class="flex items-center gap-3">
+                                <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 09</div>
+                                <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/query</div>
+                            </div>
+                            <h3 class="serif text-3xl lg:text-4xl font-black mt-3 leading-[0.95]">
+                                Ask it plainly. <span class="italic font-light">Get SQL-grade answers.</span>
+                            </h3>
+                            <p class="mt-3 text-[var(--paper)]/65 max-w-2xl">Natural-language screening against a whitelisted query surface. No syntax, no dialect — just plain-text questions, safe on every path.</p>
+                        </div>
+                        <div class="mono text-[11px] bg-black/40 border border-[var(--hair)] p-4 leading-relaxed max-w-sm">
+                            <div class="text-[var(--paper)]/40">&gt; ask</div>
+                            <div class="text-[var(--paper)] mt-1">banks with RSI below 35<br>and positive YTD return</div>
+                            <div class="text-[var(--amber)] mt-3">→ GCB · SCB · CAL</div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- 10. Audit log (full bleed) -->
+                <article id="api" class="col-span-12 bg-[var(--ink)] p-7 lg:p-9 group hover:bg-[#100e0a] transition">
+                    <div class="grid md:grid-cols-[1fr_auto] gap-6 items-center">
+                        <div>
+                            <div class="flex items-center gap-3">
+                                <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--paper)]/40">№ 10</div>
+                                <div class="mono text-[10px] uppercase tracking-[0.22em] text-[var(--amber)]">/audit</div>
+                            </div>
+                            <h3 class="serif text-3xl lg:text-4xl font-black mt-3 leading-[0.95]">
+                                Compliance-grade <span class="italic font-light">audit log.</span>
+                            </h3>
+                            <p class="mt-3 text-[var(--paper)]/65 max-w-2xl">Every query, every key, every keystroke — captured, signed and exportable. Built for the regulator's eye.</p>
+                        </div>
+                        <div class="mono text-[10px] grid grid-cols-2 gap-x-6 gap-y-1 text-[var(--paper)]/60">
+                            <span>14:32:08</span><span>quote.MTNGH · 200</span>
+                            <span>14:32:11</span><span>auth.refresh · 200</span>
+                            <span>14:32:14</span><span>watch.add  · 201</span>
+                            <span>14:32:19</span><span>alert.fire · 200</span>
+                        </div>
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ ORACLE PULL-QUOTE ============ -->
+    <section id="oracle" class="border-b border-[var(--hair-strong)] relative">
+        <div class="max-w-[1100px] mx-auto px-6 lg:px-10 py-20 lg:py-28 text-center">
+            <div class="serif text-[var(--amber)] text-7xl leading-none mb-4">“</div>
+            <blockquote class="serif text-3xl md:text-5xl font-light leading-[1.1] tracking-tight">
+                Markets reward those who can <span class="italic">see them clearly</span>.
+                The GSE deserves a terminal that doesn't blink.
+            </blockquote>
+            <div class="mt-8 flex items-center justify-center gap-3 mono text-[10px] uppercase tracking-[0.28em] text-[var(--paper)]/50">
+                <span class="w-8 h-px bg-[var(--amber)]"></span>
+                <span>The Editors</span>
+                <span class="w-8 h-px bg-[var(--amber)]"></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ FINAL CTA ============ -->
+    <section class="border-b border-[var(--hair-strong)]">
+        <div class="max-w-[1400px] mx-auto px-6 lg:px-10 py-16 grid lg:grid-cols-12 gap-10 items-end">
+            <div class="lg:col-span-8">
+                <div class="mono text-[10px] uppercase tracking-[0.28em] text-[var(--amber)]">§ III — Subscribe</div>
+                <h2 class="serif text-5xl lg:text-7xl font-black mt-3 leading-[0.95]">
+                    Open the wire.<br>
+                    <span class="italic font-light">Read the room.</span>
+                </h2>
+            </div>
+            <div class="lg:col-span-4 flex flex-col gap-3">
+                <a href="/terminal" class="group flex items-center justify-between px-6 py-5 bg-[var(--amber)] text-[var(--ink)] mono text-[11px] uppercase tracking-[0.22em] font-bold">
+                    <span>Open Terminal</span>
+                    <span class="group-hover:translate-x-1 transition">→</span>
+                </a>
+                {{if not .IsAuthenticated}}
+                <a href="/login" class="group flex items-center justify-between px-6 py-5 border border-[var(--hair-strong)] text-[var(--paper)] hover:border-[var(--amber)] hover:text-[var(--amber)] mono text-[11px] uppercase tracking-[0.22em]">
+                    <span>Establish credentials</span>
+                    <span class="group-hover:translate-x-1 transition">→</span>
+                </a>
+                {{end}}
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="bg-[var(--ink)]">
+        <div class="max-w-[1400px] mx-auto px-6 lg:px-10 py-10 grid md:grid-cols-[auto_1fr_auto] gap-6 items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-7 h-7 border border-[var(--amber)] flex items-center justify-center"><div class="w-4 h-4 bg-[var(--amber)]"></div></div>
+                <div class="serif text-lg font-black">GSE<span class="text-[var(--amber)]">·</span>Terminal</div>
+            </div>
+            <div class="mono text-[10px] uppercase tracking-[0.24em] text-[var(--paper)]/40 md:text-center">
+                Set in Fraunces &amp; IBM Plex Mono · Composed in Accra · MMXXVI
+            </div>
+            <div class="flex items-center gap-3 mono text-[10px] uppercase tracking-[0.24em] text-[var(--paper)]/55">
+                <span class="inline-block w-2 h-3" style="background:var(--ghana-red)"></span>
+                <span class="inline-block w-2 h-3" style="background:var(--ghana-gold)"></span>
+                <span class="inline-block w-2 h-3" style="background:var(--ghana-green)"></span>
+                <span>Made for Ghana</span>
+            </div>
+        </div>
+        <div class="border-t border-[var(--hair)]">
+            <div class="max-w-[1400px] mx-auto px-6 lg:px-10 py-3 flex items-center justify-between mono text-[9px] uppercase tracking-[0.24em] text-[var(--paper)]/35">
+                <span>End of dispatch <span class="blink">▮</span></span>
+                <span>— 30 —</span>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>

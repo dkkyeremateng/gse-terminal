@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSE Terminal — Swagger · /v1</title>
+    <meta name="description" content="Interactive OpenAPI reference for the GSE Terminal /v1 API. Try calls against a live server from the browser.">
+    <link rel="icon" type="image/png" href="/favicon.png">
+
+    <!-- Swagger UI is bundled by Vite via ui/src/swagger.js. The module
+         pulls in the runtime and the stock swagger-ui.css, so the
+         interactive section below renders in the default theme. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+    /* Page shell — only the navbar is styled. Swagger UI below is left
+       in its stock appearance. */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fafafa; color: #3b4151; }
+    body {
+        font-family: 'Inter', system-ui, sans-serif;
+        font-feature-settings: "ss01","cv11","tnum";
+        -webkit-font-smoothing: antialiased;
+    }
+
+    :root {
+        --ink:           #0b0a08;
+        --paper:         #f4ecd8;
+        --hair:          rgba(244,236,216,0.14);
+        --hair-strong:   rgba(244,236,216,0.28);
+        --moss:          #4a6b2a;
+        --rust:          #b55a2a;
+        /* Opaque on purpose. Scalar's light body (#fafafa) lets any
+           translucency show through as a wash, so the translucent
+           rgba(11,10,8,0.85) that works on the dark /developers page
+           lifts the navbar here. Match /developers visually by going
+           fully opaque — no blur artefacts against a white canvas. */
+        --nav-bg:        #0b0a08; /* var(--ink) solid */
+        --nav-fg:        var(--paper);
+        --nav-fg-dim:    rgba(244,236,216,0.7);
+        --nav-fg-fade:   rgba(244,236,216,0.4);
+        --amber:         #ffb12b;
+        --amber-deep:    #c97a06;
+        --green:         #4a6b2a;
+        --ghana-red:     #ce1126;
+        --ghana-gold:    #fcd116;
+        --ghana-green:   #006b3f;
+    }
+
+    /* ── Tape bar (top sticky, identical to the developers' dispatch
+         page so both /developers pages share the exact same mast +
+         ticker header). The marquee text here is a rolling list of the
+         /v1 endpoints — pure decoration; interactive API lookup still
+         lives in the Swagger UI below. ──────────────────────────────── */
+    @keyframes tape { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @keyframes pip {
+        0%   { box-shadow: 0 0 0 0 rgba(255,177,43,0.55); }
+        70%  { box-shadow: 0 0 0 8px rgba(255,177,43,0); }
+        100% { box-shadow: 0 0 0 0 rgba(255,177,43,0); }
+    }
+    .top-sticky { position: sticky; top: 0; z-index: 70; }
+    .tape-bar {
+        background: var(--nav-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--hair-strong);
+        height: 32px;
+        display: flex; align-items: stretch;
+    }
+    .tape-dateline {
+        display: none;
+        align-items: center; gap: 8px;
+        padding: 0 14px;
+        border-right: 1px solid var(--hair);
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(244,236,216,0.6);
+    }
+    .tape-dateline .pip {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--amber);
+        animation: pip 1.8s ease-out infinite;
+    }
+    @media (min-width: 720px) { .tape-dateline { display: flex; } }
+    .tape-rail { position: relative; flex: 1; overflow: hidden; }
+    .tape-rail-inner {
+        display: flex; white-space: nowrap;
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 11px;
+        padding: 8px 0;
+        color: rgba(244,236,216,0.7);
+    }
+    .tape-rail-inner span.kv { padding: 0 22px; }
+    .tape-rail-inner span.kv b { color: var(--amber); font-weight: 600; }
+    .tape-rail-inner span.kv .up { color: var(--moss); }
+    .tape-rail-inner span.kv .down { color: var(--rust); }
+    .tape-rail::before, .tape-rail::after {
+        content: ""; pointer-events: none;
+        position: absolute; inset-block: 0; width: 64px;
+        z-index: 2;
+    }
+    .tape-rail::before { left: 0;  background: linear-gradient(to right, var(--ink), transparent); }
+    .tape-rail::after  { right: 0; background: linear-gradient(to left,  var(--ink), transparent); }
+    .tape-clock {
+        display: none;
+        align-items: center; gap: 10px;
+        padding: 0 14px;
+        border-left: 1px solid var(--hair);
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(244,236,216,0.6);
+    }
+    .tape-clock .dot { color: var(--amber); }
+    @media (min-width: 1024px) { .tape-clock { display: flex; } }
+    .tape-track { animation: tape 80s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+        .tape-track { animation: none !important; }
+    }
+
+    /* ── Navbar ─────────────────────────────────────────────────────── */
+    .navbar {
+        /* Stickiness moved up to the .top-sticky wrapper so the tape bar
+           + masthead travel together when the Swagger panel scrolls. */
+        background: var(--nav-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        color: var(--nav-fg);
+        border-bottom: 1px solid var(--hair-strong);
+    }
+    .navbar-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px 24px;   /* Match lg:px-10 py-5 roughly */
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+    }
+
+    /* Brand lockup */
+    .nav-brand {
+        display: inline-flex; align-items: center; gap: 16px;
+        text-decoration: none; color: inherit;
+        flex-shrink: 0;
+    }
+    .nav-mark {
+        width: 36px; height: 36px;
+        border: 1px solid var(--amber);
+        display: flex; align-items: center; justify-content: center;
+        position: relative;
+    }
+    .nav-mark > span {
+        display: block;
+        width: 20px; height: 20px;
+        background: var(--amber);
+    }
+    .nav-mark::after {
+        content: "";
+        position: absolute; top: -2px; right: -2px;
+        width: 6px; height: 6px;
+        background: var(--ghana-red);
+        border-radius: 0;
+    }
+    .nav-word-group {
+        display: flex; flex-direction: column; line-height: 1;
+    }
+    .nav-word {
+        font-family: 'Inter', serif;
+        font-optical-sizing: auto; 
+        font-variation-settings: "SOFT" 30, "WONK" 1;
+        font-weight: 900; /* font-black */
+        font-size: 24px;  /* text-2xl */
+        letter-spacing: -0.025em; /* tracking-tight */
+        color: var(--nav-fg);
+    }
+    .nav-word em { font-style: normal; color: var(--amber); padding: 0; }
+    
+    .nav-brand-sub {
+        /* Matches landing's `mono text-[9px] uppercase tracking-[0.28em]
+           text-[var(--paper)]/50 mt-1`: 9px mono, 0.28em tracking, 50%
+           paper opacity, 4px top margin. Drops from the local --nav-fg-fade
+           (40%) to a landing-parity rgba so the subtitle reads the same
+           across all three public pages. */
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.28em;
+        color: rgba(244,236,216,0.5);
+        margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .nav-stamp {
+        padding: 2px 6px;
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        color: rgba(11, 10, 8, 0.9);
+        background: var(--amber);
+        text-transform: uppercase;
+    }
+
+    /* Primary nav links */
+    .nav-links {
+        display: flex; align-items: center; gap: 32px; /* gap-8 */
+    }
+    .nav-links a {
+        display: inline-flex; align-items: center;
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 11px;
+        font-weight: 400;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--nav-fg-dim);
+        text-decoration: none;
+        transition: color .15s;
+    }
+    .nav-links a:hover { color: var(--amber); }
+    /* Active state mirrors /developers `.mast-nav a.active`: full-strength
+       paper text with a 2px amber underline under the hit area, rather
+       than re-colouring the text amber. Keeps both pages' current-page
+       cue identical. */
+    .nav-links a.active {
+        position: relative;
+        color: var(--paper);
+    }
+    .nav-links a.active::after {
+        content: ""; position: absolute;
+        bottom: -6px; left: 0; right: 0; height: 2px;
+        background: var(--amber);
+    }
+
+    /* Spec download pills */
+    .nav-spec {
+        display: flex; align-items: center; gap: 12px;
+        margin-left: auto;
+    }
+    .nav-spec a {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 6px 12px;
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 11px;
+        font-weight: 400;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--nav-fg-dim);
+        text-decoration: none;
+        background: transparent;
+        border: 1px solid rgba(244,236,216,0.14); /* var(--hair) */
+        transition: color .15s, border-color .15s;
+    }
+    .nav-spec a:hover {
+        color: var(--amber);
+        border-color: var(--amber);
+    }
+    .nav-spec a .dl-icon {
+        width: 12px; height: 12px;
+        opacity: 0.7;
+    }
+
+    /* CTA */
+    .nav-cta {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 10px 16px;
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: 11px;
+        font-weight: 400;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--ink);
+        background: var(--amber);
+        text-decoration: none;
+        transition: background .15s;
+    }
+    .nav-cta:hover { background: var(--paper); }
+    .nav-cta .arr { transition: transform .2s; }
+    .nav-cta:hover .arr { transform: translateX(2px); }
+
+    /* Mobile */
+    @media (max-width: 860px) {
+        .nav-links, .nav-spec { display: none; }
+        .nav-cta { margin-left: auto; }
+        .navbar-inner { padding: 16px 20px; }
+    }
+    </style>
+</head>
+<body>
+
+    <!-- ═══ Sticky top: tape line + navbar (dispatch parity) ═══════════
+         Same treatment as /developers so the two public developer pages
+         share one masthead rhythm. Tape marquee runs a decorative list
+         of the /v1 endpoints. -->
+    <div class="top-sticky">
+        <div class="tape-bar">
+            <div class="tape-dateline">
+                <span class="pip"></span>
+                <span>Swagger · /v1</span>
+            </div>
+            <div class="tape-rail">
+                <div class="tape-rail-inner tape-track" aria-hidden="true">
+                    <span class="kv">GET <b>/v1/history</b></span>
+                    <span class="kv">GET <b>/v1/compare</b></span>
+                    <span class="kv">GET <b>/v1/symbols</b></span>
+                    <span class="kv">GET <b>/v1/market-summary</b></span>
+                    <span class="kv">GET <b>/v1/briefing</b></span>
+                    <span class="kv">GET <b>/v1/news</b></span>
+                    <span class="kv">GET <b>/v1/ai-insight</b> <span class="up">PRO</span></span>
+                    <span class="kv">GET <b>/v1/market-sectors</b> <span class="up">PRO</span></span>
+                    <span class="kv">POST <b>/v1/query</b> <span class="up">PRO</span></span>
+                    <span class="kv">GET <b>/v1/me</b></span>
+                    <span class="kv">GET <b>/v1/watchlist</b></span>
+                    <span class="kv">GET <b>/v1/me/alerts</b> <span class="up">PRO</span></span>
+                    <span class="kv">GET <b>/v1/me/api-keys</b></span>
+                    <!-- Duplicated for seamless marquee loop -->
+                    <span class="kv">GET <b>/v1/history</b></span>
+                    <span class="kv">GET <b>/v1/compare</b></span>
+                    <span class="kv">GET <b>/v1/symbols</b></span>
+                    <span class="kv">GET <b>/v1/market-summary</b></span>
+                    <span class="kv">GET <b>/v1/briefing</b></span>
+                    <span class="kv">GET <b>/v1/news</b></span>
+                    <span class="kv">GET <b>/v1/ai-insight</b> <span class="up">PRO</span></span>
+                    <span class="kv">GET <b>/v1/market-sectors</b> <span class="up">PRO</span></span>
+                    <span class="kv">POST <b>/v1/query</b> <span class="up">PRO</span></span>
+                    <span class="kv">GET <b>/v1/me</b></span>
+                    <span class="kv">GET <b>/v1/watchlist</b></span>
+                    <span class="kv">GET <b>/v1/me/alerts</b> <span class="up">PRO</span></span>
+                    <span class="kv">GET <b>/v1/me/api-keys</b></span>
+                </div>
+            </div>
+            <div class="tape-clock">
+                <span>Edition MMXXVI</span>
+                <span class="dot">●</span>
+                <span>Stable</span>
+            </div>
+        </div>
+
+        <header class="navbar">
+        <div class="navbar-inner">
+
+            <a href="/" class="nav-brand">
+                <div class="nav-mark"><span></span></div>
+                <div class="nav-word-group">
+                    <div class="nav-word">GSE<em>·</em>Terminal</div>
+                    <div class="nav-brand-sub">
+                        <span>VOL. I . SWAGGER . /v1</span>
+                    </div>
+                </div>
+            </a>
+
+            <nav class="nav-links" aria-label="Primary">
+                <a href="/">Front page</a>
+                <a href="/developers">Dispatch</a>
+                <a href="/developers/swagger" class="active">Swagger</a>
+            </nav>
+
+            <div class="nav-spec">
+                <a href="/v1/openapi.json" title="Download OpenAPI spec as JSON">
+                    <svg class="dl-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0 3-3m-3 3-3-3"/><path d="M2 12v1.5A1.5 1.5 0 0 0 3.5 15h9a1.5 1.5 0 0 0 1.5-1.5V12"/></svg>
+                    openapi.json
+                </a>
+                <a href="/v1/openapi.yaml" title="Download OpenAPI spec as YAML">
+                    <svg class="dl-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0 3-3m-3 3-3-3"/><path d="M2 12v1.5A1.5 1.5 0 0 0 3.5 15h9a1.5 1.5 0 0 0 1.5-1.5V12"/></svg>
+                    openapi.yaml
+                </a>
+            </div>
+
+            <a href="/login" class="nav-cta">
+                Issue a key <span class="arr">→</span>
+            </a>
+
+        </div>
+        </header>
+    </div><!-- /top-sticky -->
+
+    <!-- Scalar UI mounts here. Dark mode is native. -->
+    <script id="api-reference" 
+            data-url="/v1/openapi.json" 
+            data-theme="default" 
+            data-hide-models="false"
+            data-layout="modern"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+
+</body>
+</html>
+

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline — GSE Terminal</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <!-- Manifest + theme-color need to be present here too. The SW
+         falls back to this page on offline navigations, so without
+         these tags Chrome would report "No manifest detected" while
+         the user is on the fallback. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b0a08">
+    <link rel="apple-touch-icon" href="/favicon.png">
+    <style>
+        :root {
+            --ink:  #0b0a08;
+            --paper:#f4ecd8;
+            --amber:#ffb12b;
+            --hair: rgba(244,236,216,0.14);
+        }
+        html, body { margin: 0; padding: 0; height: 100%; background: var(--ink); color: var(--paper); }
+        body {
+            font-family: 'Inter Tight', system-ui, sans-serif;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center; padding: 32px;
+        }
+        .mark {
+            width: 56px; height: 56px;
+            border: 1px solid var(--amber);
+            display: inline-flex; align-items: center; justify-content: center;
+            margin-bottom: 28px;
+        }
+        .mark > div { width: 28px; height: 28px; background: var(--amber); }
+        h1 {
+            font-family: 'Inter', serif;
+            font-weight: 900; font-size: 28px;
+            margin: 0 0 8px; letter-spacing: -0.02em;
+        }
+        p { max-width: 36ch; line-height: 1.55; color: rgba(244,236,216,0.7); margin: 0 0 24px; }
+        button, a {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 16px;
+            background: var(--amber); color: var(--ink);
+            border: none; cursor: pointer;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700;
+            text-decoration: none;
+        }
+        .meta {
+            margin-top: 32px;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+            color: rgba(244,236,216,0.4);
+        }
+    </style>
+</head>
+<body>
+    <div class="mark"><div></div></div>
+    <h1>Terminal Offline</h1>
+    <p>You're not connected to the network. Cached pages will still load; live data resumes when the link returns.</p>
+    <button onclick="location.reload()">Try again</button>
+    <div class="meta">GSE · Terminal</div>
+</body>
+</html>

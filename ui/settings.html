@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Ledger — GSE Terminal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+    <script>
+        window.userRole = '{{.UserRole}}';
+    </script>
+    <script type="module" src="/static/settings.js"></script>
+    <link rel="icon" type="image/png" href="/favicon.png">
+</head>
+<body class="settings-body">
+    <div class="settings-shell">
+
+        <!-- ═══════════════════════════════════════════════════════════════
+             Masthead — the page's "publication plate". Brand mark on the
+             left, dossier title + dateline in the centre (desktop only),
+             navigation affordances on the right. Intentionally restrained
+             so the giant Fraunces hero below can carry the weight.
+             ═══════════════════════════════════════════════════════════════ -->
+        <nav class="settings-masthead">
+            <a href="/terminal" class="masthead-brand">
+                <div class="gse-mark"><div></div></div>
+                <div class="leading-none">
+                    <h1 class="serif text-lg font-black tracking-tight text-[var(--paper)]">GSE<span class="text-[var(--amber)]">·</span>Terminal</h1>
+                    <span class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/55">File №&nbsp;<span id="masthead-file">—</span></span>
+                </div>
+            </a>
+
+            <div class="masthead-dateline">
+                <span class="title">The <em>Account</em> Ledger</span>
+                <span class="meta">
+                    <span id="dateline-today">—</span>
+                    <span class="dot"></span>
+                    <span>Vol. I · Accra, Ghana</span>
+                </span>
+            </div>
+
+            <div class="masthead-actions">
+                <a href="/terminal" class="masthead-btn">← Terminal</a>
+                <button hx-post="/logout" class="masthead-btn masthead-btn--icon" title="Sign out" aria-label="Sign out">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                </button>
+            </div>
+        </nav>
+
+        <!-- ═══════════════════════════════════════════════════════════════
+             Hero — The dossier's opening spread. Monogram circle on the
+             right, name + chips + a handwritten italic tagline on the left.
+             All text is populated from /v1/me in settings.js via
+             renderDossierHero(). Initial defaults are em-dashes so the
+             layout never jumps when data arrives.
+             ═══════════════════════════════════════════════════════════════ -->
+        <section class="dossier-hero" aria-labelledby="dossier-name">
+            <div>
+                <span class="eyebrow">Personal File · <span id="dossier-role-eyebrow">Observer</span></span>
+                <h1 id="dossier-name" class="dossier-name">—</h1>
+                <div class="dossier-chips">
+                    <span id="dossier-status-chip" class="chip chip--primary">Active session</span>
+                    <span id="dossier-provider-chip" class="chip chip--muted">—</span>
+                    <span id="dossier-email-chip" class="chip chip--muted">Email pending</span>
+                </div>
+                <p id="dossier-bio" class="dossier-bio">A quiet logbook for the credentials, notifications, and keys that keep this terminal yours.</p>
+            </div>
+            <div class="monogram-wrap">
+                <div id="dossier-monogram" class="monogram" data-seal="0001">—</div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════════════
+             Stats strip — four columns that read like a ticker of personal
+             vitals. The alert- and key-count cells are updated after the
+             feature modules resolve, via the window.update*Stat hooks
+             installed by settings.js.
+             ═══════════════════════════════════════════════════════════════ -->
+        <section class="dossier-stats" aria-label="Account vitals">
+            <div class="stat">
+                <span class="stat-k">Tier</span>
+                <span id="stat-tier" class="stat-v">—</span>
+                <span class="stat-note">Access level</span>
+            </div>
+            <div class="stat">
+                <span class="stat-k">Inbox</span>
+                <span id="stat-email" class="stat-v">—</span>
+                <span id="stat-email-note" class="stat-note">—</span>
+            </div>
+            <div class="stat">
+                <span class="stat-k">Alert Rules</span>
+                <span id="stat-rules" class="stat-v">—</span>
+                <span id="stat-rules-note" class="stat-note">Armed & paused</span>
+            </div>
+            <div class="stat">
+                <span class="stat-k">Access Keys</span>
+                <span id="stat-keys" class="stat-v">—</span>
+                <span id="stat-keys-note" class="stat-note">Active credentials</span>
+            </div>
+        </section>
+
+        <!-- Mobile contents chip row (replaces the sticky TOC under 960px). -->
+        <nav class="dossier-chipnav" aria-label="Sections (mobile)">
+            <a href="#account"  data-toc-mobile="account"><span class="num">01</span>Credentials</a>
+            <a href="#alerts"   data-toc-mobile="alerts"><span class="num">02</span>Notifications</a>
+            <a href="#api-keys" data-toc-mobile="api-keys"><span class="num">03</span>Access Keys</a>
+        </nav>
+
+        <!-- ═══════════════════════════════════════════════════════════════
+             Body grid — sticky TOC rail on the left, section stack on the
+             right. The TOC's active class is driven by an IntersectionObserver
+             in settings.js.
+             ═══════════════════════════════════════════════════════════════ -->
+        <div class="dossier-grid">
+
+            <aside class="dossier-toc" aria-label="Contents">
+                <span class="eyebrow">Contents</span>
+                <nav>
+                    <a href="#account"  data-toc="account"  class="active">
+                        <span class="toc-num">01</span>
+                        <span class="toc-label">Credentials</span>
+                    </a>
+                    <a href="#alerts"   data-toc="alerts">
+                        <span class="toc-num">02</span>
+                        <span class="toc-label">Notifications</span>
+                    </a>
+                    <a href="#api-keys" data-toc="api-keys">
+                        <span class="toc-num">03</span>
+                        <span class="toc-label">Access Keys</span>
+                    </a>
+                </nav>
+            </aside>
+
+            <div class="dossier-content">
+
+                <!-- ─── § 01 · Credentials ─────────────────────────────────
+                     features/account.js renders identity, email, and password
+                     controls directly into the IDs below. The outer
+                     #account-modal ID is a sentinel that the module's
+                     openAccountModal() entry point looks for — it's present
+                     and never hidden here, so section behaviour is implicit.
+                     ──────────────────────────────────────────────────────── -->
+                <section id="account" class="dossier-section">
+                    <header class="dossier-section__head">
+                        <span class="section-num">§&nbsp;01 · Identity</span>
+                        <h2 class="section-title">Credentials</h2>
+                        <p class="section-lede">Identity, inbox, and the password that stands between you and everything else. Every change here re-probes your session, so effects are immediate.</p>
+                    </header>
+
+                    <div id="account-modal" class="dossier-panel">
+                        <div class="panel-row">
+                            <div class="panel-row__k">Signed in as</div>
+                            <div class="panel-row__v">
+                                <div id="account-identity"></div>
+                            </div>
+                        </div>
+                        <div class="panel-row">
+                            <div class="panel-row__k">Email address</div>
+                            <div class="panel-row__v">
+                                <div id="account-email-body"></div>
+                            </div>
+                        </div>
+                        <div class="panel-row">
+                            <div class="panel-row__k">Password</div>
+                            <div class="panel-row__v">
+                                <div id="account-password-body"></div>
+                            </div>
+                        </div>
+                        <div class="panel-row">
+                            <div class="panel-row__k">Pro access</div>
+                            <div class="panel-row__v">
+                                <div id="account-pro-body"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ─── § 02 · Notifications ────────────────────────────────
+                     The rule-management modal's DOM lives here verbatim —
+                     features/alerts.js toggles #alert-verify-panel and
+                     #alert-authoring-panel based on the email-verified
+                     gate, and renders the rule list into #alert-rules-list.
+                     Omitting `hidden` on #alert-rules-modal is intentional:
+                     openAlertRulesModal() only removes hidden on that root;
+                     on the settings page we want it visible on load.
+                     ──────────────────────────────────────────────────────── -->
+                <section id="alerts" class="dossier-section">
+                    <header class="dossier-section__head">
+                        <span class="section-num">§&nbsp;02 · Watchtower</span>
+                        <h2 class="section-title">Notifications<em>.</em></h2>
+                        <p class="section-lede">Rules that fire when your watched securities breach a threshold. Each hit fans out over email, so a verified address is the price of admission.</p>
+                        <span id="alerts-role-hint" class="role-hint"></span>
+                    </header>
+
+                    <div id="alert-rules-modal" class="dossier-panel">
+
+                        <!-- Email-verify gate. Unhidden by features/alerts.js
+                             whenever the user lacks a verified email. -->
+                        <div id="alert-verify-panel" class="panel-row hidden">
+                            <div class="panel-row__k">Verify email</div>
+                            <div class="panel-row__v">
+                                <p class="section-lede" style="margin-bottom:16px;">Alert notifications fan out over email, so an attached verified address is required before a rule can be authored.</p>
+                                <div id="alert-verify-oauth" class="oauth-grid"></div>
+                                <div class="divider-or" aria-hidden="true"><span>or</span></div>
+                                <form data-submit-action="request-verify-email" class="field-stack">
+                                    <label for="verify-form-email" class="field-label">Send a verification link</label>
+                                    <div class="field-row">
+                                        <input id="verify-form-email" name="email" type="email" placeholder="you@example.com" class="field-input">
+                                        <button type="submit" class="btn btn--primary">Send link</button>
+                                    </div>
+                                    <div id="verify-form-status" class="field-status"></div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Authoring panel. Owns the rule-creation form. -->
+                        <div id="alert-authoring-panel" class="panel-row">
+                            <div class="panel-row__k">Add rule</div>
+                            <div class="panel-row__v">
+                                <form data-submit-action="create-alert-rule" class="rule-form">
+                                    <div class="rule-form__grid">
+                                        <div class="rule-field">
+                                            <label for="alert-form-symbol" class="field-label">Symbol</label>
+                                            <input id="alert-form-symbol" name="symbol" type="text" placeholder="MTNGH" maxlength="10" autocomplete="off" spellcheck="false" class="field-input field-input--symbol">
+                                        </div>
+                                        <div class="rule-field">
+                                            <label for="alert-form-metric" class="field-label">Metric</label>
+                                            <select id="alert-form-metric" name="metric" class="field-input">
+                                                <option value="price">Price</option>
+                                                <option value="pct_change">% Change</option>
+                                                <option value="rsi">RSI(14)</option>
+                                            </select>
+                                        </div>
+                                        <div class="rule-field">
+                                            <label for="alert-form-op" class="field-label">Trigger</label>
+                                            <div class="rule-inline">
+                                                <select id="alert-form-op" name="op" class="field-input field-input--compact">
+                                                    <option value=">">&gt;</option>
+                                                    <option value=">=">&ge;</option>
+                                                    <option value="<">&lt;</option>
+                                                    <option value="<=">&le;</option>
+                                                </select>
+                                                <input id="alert-form-threshold" name="threshold" type="number" step="any" placeholder="Value" class="field-input">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="rule-form__tail">
+                                        <div id="alert-form-status" class="field-status"></div>
+                                        <button type="submit" class="btn btn--primary">Arm rule</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Active rules row. features/alerts.js owns the
+                             inner markup and toggles `.hidden` on
+                             #alert-rules-list when empty. -->
+                        <div class="panel-row">
+                            <div class="panel-row__k">Armed rules</div>
+                            <div class="panel-row__v">
+                                <div id="alert-rules-list" class="hidden"></div>
+                                <p id="alert-rules-empty" class="section-lede" style="font-size:14px; margin:0;">No rules armed yet. Add one above and we’ll whisper when the market moves.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ─── § 03 · Access Keys ──────────────────────────────────
+                     CRUD against /v1/me/api-keys. features/api-keys.js
+                     renders into #api-key-list; submit wires via
+                     data-submit-action="create-api-key"; the one-time secret
+                     reveal uses #api-key-new + #api-key-new-secret.
+                     ──────────────────────────────────────────────────────── -->
+                <section id="api-keys" class="dossier-section">
+                    <header class="dossier-section__head">
+                        <span class="section-num">§&nbsp;03 · Vault</span>
+                        <h2 class="section-title">Access <em>Keys</em></h2>
+                        <p class="section-lede">Programmatic credentials for the public API — history, compare, briefing, AI insight. The raw secret is surfaced once and only once. Copy it, or kiss it goodbye.</p>
+                    </header>
+
+                    <div class="dossier-panel">
+                        <div class="panel-row">
+                            <div class="panel-row__k">Mint a key</div>
+                            <div class="panel-row__v">
+                                <form data-submit-action="create-api-key" class="field-stack">
+                                    <label for="api-key-name" class="field-label">Label</label>
+                                    <div class="field-row">
+                                        <input id="api-key-name" name="name" type="text" placeholder="e.g. Backtest script" maxlength="200" class="field-input">
+                                        <button type="submit" class="btn btn--primary">Generate</button>
+                                    </div>
+
+                                    <div id="api-key-new" class="secret-banner hidden" role="status" aria-live="polite">
+                                        <div class="secret-banner__head">
+                                            <span>New key · shown once</span>
+                                            <button data-action="copy-api-key" type="button" class="btn btn--ghost">Copy</button>
+                                        </div>
+                                        <code id="api-key-new-secret"></code>
+                                        <p class="secret-banner__warn">Save it now — closing this page wipes it.</p>
+                                    </div>
+
+                                    <div id="api-key-status" class="field-status"></div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="panel-row">
+                            <div class="panel-row__k">Issued keys</div>
+                            <div class="panel-row__v">
+                                <div id="api-key-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <footer class="dossier-colophon">
+                    <span>GSE · Terminal</span>
+                    <span><em>End</em> of file</span>
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toasts — same container id the shared showToast() helper writes into. -->
+    <div id="toast-container"></div>
+</body>
+</html>

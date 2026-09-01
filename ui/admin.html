@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — GSE Data Node</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module" src="/static/app.js"></script>
+    <style id="gse-theme">
+        :root {
+            --ink:#0b0a08; --ink-2:#100e0a; --paper:#f4ecd8; --cream:#e9dfc4;
+            --amber:#ffb12b; --amber-deep:#c97a06; --rust:#b23a17; --moss:#4a6b2a;
+            --ghana-red:#ce1126; --ghana-gold:#fcd116; --ghana-green:#006b3f;
+            --hair:rgba(244,236,216,0.10); --hair-strong:rgba(244,236,216,0.22);
+        }
+        html, body {
+            background: var(--ink) !important; color: var(--paper);
+            font-family:'Inter',system-ui,sans-serif;
+            font-feature-settings:"ss01","cv11","tnum"; -webkit-font-smoothing:antialiased;
+        }
+        .font-display, h1, h2, h3.font-display { font-family:'Inter',serif !important; font-optical-sizing:auto; font-variation-settings:"SOFT" 30; letter-spacing:-0.02em; }
+        .font-mono, kbd, code, pre { font-family:'IBM Plex Mono',ui-monospace,monospace !important; font-feature-settings:"tnum","zero"; }
+        /* Shared masthead helpers — match landing.html and terminal.html */
+        .serif { font-family:'Inter',serif; font-optical-sizing:auto; font-variation-settings:"SOFT" 30, "WONK" 1; }
+        .mono  { font-family:'IBM Plex Mono',ui-monospace,monospace; font-feature-settings:"tnum","zero"; }
+        body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:60;
+            background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 .92  0 0 0 0 .78  0 0 0 .05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+            mix-blend-mode:overlay; opacity:.5; }
+        body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:59;
+            background-image: repeating-linear-gradient(to bottom, transparent 0 3px, rgba(255,255,255,.012) 3px 4px); }
+
+        .glass { background: rgba(11,10,8,0.78) !important; backdrop-filter: blur(8px); border-color: var(--hair-strong) !important; }
+        .glass-card { background: rgba(16,14,10,0.7) !important; border:1px solid var(--hair-strong) !important; border-radius:2px !important; box-shadow:none !important; }
+        .rounded-2xl, .rounded-3xl, .rounded-xl, .rounded-lg { border-radius:2px !important; }
+        .rounded-full { border-radius:9999px !important; }
+
+        /* Map all blue/indigo/amber/purple accents → amber */
+        .bg-blue-500,.bg-blue-600,.hover\:bg-blue-500:hover,.hover\:bg-blue-600:hover,
+        .bg-amber-500,.bg-amber-600,.bg-purple-500,.bg-purple-600 { background-color: var(--amber) !important; color: var(--ink) !important; }
+        .text-blue-300,.text-blue-400,.text-blue-500,.text-indigo-400,.text-indigo-500,
+        .text-amber-300,.text-amber-400,.text-amber-500,
+        .text-purple-300,.text-purple-400,.text-purple-500,.text-fuchsia-500 { color: var(--amber) !important; }
+        .bg-blue-500\/10,.bg-blue-500\/20,.bg-amber-500\/10,.bg-amber-500\/20,.bg-purple-500\/10,.bg-purple-500\/20,
+        .bg-blue-600\/5,.bg-blue-600\/10,.bg-indigo-600\/5 { background-color: rgba(255,177,43,0.08) !important; }
+        .border-blue-500\/10,.border-blue-500\/20,.border-blue-500\/40,
+        .border-amber-500\/10,.border-amber-500\/20,
+        .border-purple-500\/10,.border-purple-500\/20 { border-color: rgba(255,177,43,0.25) !important; }
+
+        .text-slate-300,.text-slate-400 { color: rgba(244,236,216,0.78) !important; }
+        .text-slate-500,.text-slate-600 { color: rgba(244,236,216,0.5) !important; }
+        .text-white,.text-white\/90,.text-white\/95 { color: var(--paper) !important; }
+        .bg-white\/5,.hover\:bg-white\/5:hover,.bg-white\/\[0\.03\] { background-color: rgba(244,236,216,0.04) !important; }
+        .bg-white\/10,.hover\:bg-white\/10:hover { background-color: rgba(244,236,216,0.08) !important; }
+        .border-white\/5,.border-white\/10 { border-color: var(--hair) !important; }
+
+        .bg-rose-500 { background-color: var(--rust) !important; }
+        .bg-emerald-500 { background-color: var(--moss) !important; }
+        .text-rose-400,.text-rose-500 { color: var(--rust) !important; }
+        .text-emerald-400,.text-emerald-500 { color: var(--moss) !important; }
+
+        /* Sidebar items — newsroom mono tabs */
+        .sidebar-item {
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 11px !important;
+            text-transform: uppercase;
+            letter-spacing: 0.18em;
+            border-radius: 0 !important;
+            padding: 12px 14px !important;
+            border-left: 2px solid transparent;
+        }
+        .sidebar-item.active-ingestion,
+        .sidebar-item.active-users,
+        .sidebar-item.active-audit,
+        .sidebar-item.active-alerts {
+            background: rgba(255,177,43,0.08) !important;
+            color: var(--amber) !important;
+            border-left-color: var(--amber) !important;
+        }
+        .sidebar-item.active-ingestion::before,
+        .sidebar-item.active-users::before,
+        .sidebar-item.active-audit::before,
+        .sidebar-item.active-alerts::before { display:none !important; }
+        .sidebar-item:not(.active-ingestion):not(.active-users):not(.active-audit):not(.active-alerts) { color: rgba(244,236,216,0.5) !important; }
+        .sidebar-item:not(.active-ingestion):not(.active-users):not(.active-audit):not(.active-alerts):hover { color: var(--amber) !important; background: rgba(244,236,216,0.04) !important; }
+
+        /* Audit rows */
+        .audit-row { border-bottom-color: var(--hair) !important; }
+        .audit-row:hover { background: rgba(255,177,43,0.04) !important; }
+        .audit-time { color: var(--amber) !important; }
+
+        /* Tables / inputs (excluding the role-pill dropdown which paints
+           its own per-role color via inline style) */
+        input, select:not(.role-pill), textarea {
+            background: rgba(244,236,216,0.04) !important;
+            border-color: var(--hair-strong) !important;
+            color: var(--paper) !important;
+            border-radius: 2px !important;
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 12px !important;
+        }
+        input:focus, select:not(.role-pill):focus, textarea:focus { outline:none; border-color: var(--amber) !important; box-shadow: 0 0 0 1px var(--amber); }
+        /* Role pill keeps the inline-style color the server emits. */
+        select.role-pill { font-family: 'IBM Plex Mono', monospace; font-size: 11px; border-radius: 4px; }
+
+        ::selection { background: var(--amber); color: var(--ink); }
+        ::-webkit-scrollbar { width:8px; height:8px; }
+        ::-webkit-scrollbar-thumb { background: rgba(244,236,216,0.12); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--amber); }
+
+        /* Logo mark */
+        .gse-mark { width:36px; height:36px; border:1px solid var(--amber); display:flex; align-items:center; justify-content:center; position:relative; }
+        .gse-mark > div { width:20px; height:20px; background: var(--amber); }
+        .gse-mark::after { content:""; position:absolute; top:-2px; right:-2px; width:6px; height:6px; background: var(--ghana-red); }
+
+        /* Section heads */
+        h3.text-xs.font-bold, .section-head {
+            font-family:'IBM Plex Mono', monospace !important;
+            color: var(--amber) !important;
+            font-size: 10px !important;
+            letter-spacing: 0.24em !important;
+            text-transform: uppercase;
+        }
+    </style>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        /* ── Sidebar ── */
+        .sidebar-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px; border-radius: 8px;
+            font-size: 0.875rem; font-weight: 500;
+            transition: all 0.15s; cursor: pointer;
+            width: 100%; text-align: left; position: relative;
+        }
+        .sidebar-item.active-ingestion { background: rgba(59,130,246,0.1); color: rgb(96,165,250); }
+        .sidebar-item.active-users     { background: rgba(245,158,11,0.1); color: rgb(251,191,36); }
+        .sidebar-item.active-audit     { background: rgba(168,85,247,0.1); color: rgb(192,132,252); }
+        .sidebar-item.active-alerts    { background: rgba(244,63,94,0.1); color: rgb(251,113,133); }
+        .sidebar-item.active-ingestion::before,
+        .sidebar-item.active-users::before,
+        .sidebar-item.active-audit::before,
+        .sidebar-item.active-alerts::before {
+            content: ''; position: absolute; left: 0; top: 20%; bottom: 20%;
+            width: 2px; border-radius: 2px;
+        }
+        .sidebar-item.active-ingestion::before { background: rgb(96,165,250); }
+        .sidebar-item.active-users::before     { background: rgb(251,191,36); }
+        .sidebar-item.active-audit::before     { background: rgb(192,132,252); }
+        .sidebar-item.active-alerts::before    { background: rgb(251,113,133); }
+        .sidebar-item:not(.active-ingestion):not(.active-users):not(.active-audit):not(.active-alerts)       { color: #64748b; }
+        .sidebar-item:not(.active-ingestion):not(.active-users):not(.active-audit):not(.active-alerts):hover { color: #cbd5e1; background: rgba(255,255,255,0.05); }
+
+        /* ── Audit log ── */
+        .audit-row {
+            display: grid;
+            grid-template-columns: 160px 140px 180px 1fr;
+            gap: 16px;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: background 0.15s;
+        }
+        .audit-row:hover { background: rgba(255,255,255,0.015); }
+        .audit-row:last-child { border-bottom: none; }
+        .audit-time {
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            font-size: 11px;
+            color: #64748b;
+            font-variant-numeric: tabular-nums;
+        }
+        .audit-actor {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 12px; font-weight: 600; color: #cbd5e1;
+        }
+        .audit-actor-avatar {
+            width: 22px; height: 22px; border-radius: 6px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 800; color: white;
+        }
+        .audit-action {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 6px;
+            font-size: 9px; font-weight: 800; text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border: 1px solid;
+            white-space: nowrap;
+            width: fit-content;
+        }
+        .audit-action.cat-user    { background: rgba(245,158,11,0.08); color: rgb(251,191,36); border-color: rgba(245,158,11,0.2); }
+        .audit-action.cat-data    { background: rgba(59,130,246,0.08); color: rgb(96,165,250); border-color: rgba(59,130,246,0.2); }
+        .audit-action.cat-auth    { background: rgba(16,185,129,0.08); color: rgb(52,211,153); border-color: rgba(16,185,129,0.2); }
+        .audit-action.cat-key     { background: rgba(168,85,247,0.08); color: rgb(192,132,252); border-color: rgba(168,85,247,0.2); }
+        .audit-action.cat-fail    { background: rgba(244,63,94,0.08);  color: rgb(251,113,133); border-color: rgba(244,63,94,0.2); }
+        .audit-target {
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        .audit-target-type {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-right: 6px;
+        }
+        .audit-meta {
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            font-size: 10px;
+            color: #64748b;
+            background: rgba(255,255,255,0.02);
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.04);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            max-width: 100%;
+        }
+        .audit-meta.empty { color: #334155; background: transparent; border-color: transparent; }
+
+        .audit-stat-card {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 16px 18px;
+        }
+
+        /* ── Alerts tab ── */
+        .alert-row {
+            display: grid;
+            grid-template-columns: 120px 90px 110px 130px 130px 90px 80px;
+            gap: 14px;
+            align-items: center;
+            padding: 12px 18px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            font-size: 11px;
+            transition: background 0.15s;
+        }
+        .alert-row:hover { background: rgba(255,177,43,0.04); }
+        .alert-row:last-child { border-bottom: none; }
+        .alert-row .alert-symbol   { font-weight: 800; color: var(--paper); font-size: 12px; }
+        .alert-row .alert-metric   { font-size: 9px; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(244,236,216,0.5); }
+        .alert-row .alert-predicate { color: rgba(244,236,216,0.8); font-variant-numeric: tabular-nums; }
+        .alert-row .alert-owner    { font-size: 11px; color: rgba(244,236,216,0.7); font-family: 'Inter', system-ui, sans-serif; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .alert-row .alert-meta     { font-size: 10px; color: rgba(244,236,216,0.45); font-variant-numeric: tabular-nums; }
+        .alert-row .alert-status {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 9px; border-radius: 0;
+            font-size: 9px; font-weight: 800; text-transform: uppercase;
+            letter-spacing: 0.12em; border: 1px solid;
+            white-space: nowrap; width: fit-content;
+        }
+        .alert-row .alert-status.armed    { background: rgba(74,107,42,0.1); color: rgb(163,192,96); border-color: rgba(74,107,42,0.35); }
+        .alert-row .alert-status.paused   { background: rgba(244,236,216,0.06); color: rgba(244,236,216,0.5); border-color: rgba(244,236,216,0.15); }
+        .alert-row .alert-delete {
+            background: transparent;
+            border: 1px solid rgba(244,63,94,0.2);
+            color: rgb(251,113,133);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 9px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .alert-row .alert-delete:hover { background: rgba(244,63,94,0.1); color: rgb(253,164,175); }
+
+        .event-row {
+            display: grid;
+            grid-template-columns: 140px 110px 100px 130px 160px 1fr;
+            gap: 14px;
+            align-items: center;
+            padding: 12px 18px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            font-size: 11px;
+        }
+        .event-row:hover { background: rgba(255,177,43,0.04); }
+        .event-row:last-child { border-bottom: none; }
+        .event-row .event-time { color: var(--amber); font-variant-numeric: tabular-nums; font-size: 10px; }
+        .event-row .event-symbol { font-weight: 800; color: var(--paper); font-size: 12px; }
+        .event-row .event-metric { font-size: 9px; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(244,236,216,0.5); }
+        .event-row .event-predicate { color: rgba(244,236,216,0.75); font-variant-numeric: tabular-nums; }
+        .event-row .event-owner { font-size: 11px; color: rgba(244,236,216,0.7); font-family: 'Inter', system-ui, sans-serif; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .event-row .event-observed { color: var(--amber); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+        /* ── Dropzone ── */
+        #dropzone {
+            background-image: radial-gradient(rgba(255,255,255,0.06) 1.5px, transparent 1.5px);
+            background-size: 22px 22px;
+        }
+        #dropzone.drag-over {
+            border-color: rgba(59,130,246,0.6) !important;
+            background-color: rgba(59,130,246,0.04);
+            box-shadow: inset 0 0 0 1px rgba(59,130,246,0.3), 0 0 30px rgba(59,130,246,0.08);
+        }
+
+        /* ── File stats card ── */
+        #file-name-display {
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        #file-name-display.visible { display: flex; }
+        /* Filename row — single line, clamped to the parent width. The row
+           uses CSS Grid (not flexbox) for the filename slot so it shrinks
+           reliably without needing min-width: 0 propagation up the tree. */
+        #file-name-display > div:first-child {
+            display: grid !important;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        #file-name-display > div:first-child > span {
+            min-width: 0;
+            display: block;
+            overflow: hidden;
+            white-space: nowrap;
+            line-height: 1.2;
+            font-size: 12px;
+        }
+        /* Middle-truncation: show the start of the filename AND its extension
+           so the user can always see what kind of file it is. JS in
+           updateFileName() splits the name into a left fragment (flexible,
+           ellipsized at the right) and a right fragment (the extension,
+           never truncated). */
+        #file-name-display .file-left {
+            display: inline-block;
+            max-width: calc(100% - 5ch);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            vertical-align: bottom;
+        }
+        #file-name-display .file-right {
+            display: inline-block;
+            white-space: nowrap;
+            vertical-align: bottom;
+        }
+
+        /* ── Upload result ── */
+        #upload-result .result-success,
+        #upload-result .result-error {
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 12px 14px; border-radius: 12px;
+            font-size: 0.8125rem; font-weight: 500; border: 1px solid;
+            line-height: 1.5;
+        }
+        #upload-result .result-success { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.2); color: rgb(52,211,153); }
+        #upload-result .result-error   { background: rgba(244,63,94,0.08);  border-color: rgba(244,63,94,0.2);  color: rgb(251,113,133); }
+
+        /* ── Preview table ── */
+        #preview-container thead th { position: sticky; top: 0; z-index: 1; backdrop-filter: blur(8px); }
+        #preview-container tbody tr:nth-child(even) { background: rgba(255,255,255,0.012); }
+        #preview-container tbody tr:hover { background: rgba(59,130,246,0.05) !important; }
+
+        /* ── Progress ── */
+        progress { appearance: none; }
+        progress::-webkit-progress-bar   { background: rgba(255,255,255,0.05); border-radius: 4px; }
+        progress::-webkit-progress-value { background: linear-gradient(90deg, #3b82f6, #6366f1); border-radius: 4px; transition: width 0.4s; }
+
+        /* ── Stat pill ── */
+        .stat-pill {
+            display: flex; flex-direction: column; gap: 2px;
+            padding: 8px 12px; border-radius: 10px;
+            background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+            flex: 1;
+        }
+        .stat-pill-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; }
+        .stat-pill-value { font-size: 0.9rem; font-weight: 700; color: rgba(255,255,255,0.6); font-family: 'Outfit', sans-serif; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-slate-950 transition-colors duration-500">
+    <div class="w-full max-w-[1700px] mx-auto flex flex-col h-full flex-1 overflow-hidden relative shadow-2xl shadow-black/50">
+
+    <!-- ── Nav ──────────────────────────────────────────────────────── -->
+    <!-- Top Navigation — same masthead language as landing & terminal -->
+    <nav class="h-16 shrink-0 flex items-center justify-between px-4 lg:px-8 border-b border-[var(--hair-strong)] glass z-[100]">
+        <a href="/terminal" class="flex items-center gap-4">
+            <div class="gse-mark"><div></div></div>
+            <div class="leading-none">
+                <h1 class="serif text-xl font-black tracking-tight text-[var(--paper)]">GSE<span class="text-[var(--amber)]">·</span>Admin</h1>
+                <div class="flex items-center gap-1.5 mt-1.5">
+                    <div id="nav-status-dot" class="w-1.5 h-1.5 rounded-full bg-[var(--paper)]/40 animate-pulse"></div>
+                    <span id="nav-status-text" class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/60">Syncing</span>
+                </div>
+            </div>
+        </a>
+
+        <div class="flex items-center gap-2 lg:gap-3">
+            <a href="/terminal" class="inline-flex items-center gap-2 mono text-[11px] uppercase tracking-[0.2em] px-4 py-2 border border-[var(--amber)] text-[var(--amber)] hover:bg-[var(--amber)] hover:text-[var(--ink)] transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                Terminal
+            </a>
+            <button hx-post="/logout" class="mono text-[11px] uppercase tracking-[0.2em] p-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" title="Sign out">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+            </button>
+        </div>
+    </nav>
+
+    <!-- ── Shell ─────────────────────────────────────────────────────── -->
+    <div class="flex-1 flex overflow-hidden">
+
+        <!-- Sidebar -->
+        <aside class="w-52 shrink-0 border-r border-white/5 flex flex-col py-4 px-2 gap-0.5">
+            <p class="text-[9px] font-black uppercase tracking-widest text-slate-700 px-3 mb-2">Sections</p>
+
+            <button data-action="switch-tab" data-arg="ingestion" id="tab-ingestion"
+                    class="sidebar-item active-ingestion">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                Data Ingestion
+            </button>
+
+            <button data-action="switch-tab" data-arg="users" id="tab-users"
+                    class="sidebar-item">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                Identity Manager
+            </button>
+
+            <button data-action="switch-tab" data-arg="audit" id="tab-audit"
+                    class="sidebar-item">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Audit Log
+            </button>
+
+            <button data-action="switch-tab" data-arg="alerts" id="tab-alerts"
+                    class="sidebar-item">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                Watchlist Alerts
+            </button>
+
+            <button data-action="switch-tab" data-arg="pro-requests" id="tab-pro-requests"
+                    class="sidebar-item">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                Pro Requests
+                <span id="pro-requests-badge"
+                      class="ml-auto hidden mono text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">0</span>
+            </button>
+
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-hidden">
+
+            <!-- ── Ingestion View ───────────────────────────────────── -->
+            <div id="view-ingestion" class="h-full flex">
+
+                <!-- Left: Upload Panel -->
+                <div class="w-80 xl:w-96 shrink-0 border-r border-white/5 flex flex-col overflow-y-auto overflow-x-hidden no-scrollbar min-w-0">
+
+                    <div class="flex flex-col gap-5 p-6">
+
+                        <!-- Section label -->
+                        <div>
+                            <h2 class="text-sm font-bold text-white/90">Data Ingestion</h2>
+                            <p class="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Upload a GSE daily trade CSV to synchronize with the live terminal.</p>
+                        </div>
+
+                        <form id="upload-form" hx-encoding="multipart/form-data" hx-post="/upload" hx-target="#upload-result" class="flex flex-col gap-3 min-w-0">
+
+                            <!-- Dropzone — click opens the hidden file input via
+                                 the data-action dispatcher; drag+drop events are
+                                 bound programmatically in features/admin.js. -->
+                            <div id="dropzone" data-action="open-file-dialog"
+                                 class="group relative border border-white/10 rounded-2xl cursor-pointer overflow-hidden transition-all duration-300 hover:border-blue-500/40"
+                                 style="box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
+
+                                <!-- Hover glow layer -->
+                                <div class="absolute inset-0 bg-gradient-to-b from-blue-500/0 via-blue-500/0 to-blue-500/0 group-hover:from-blue-500/[0.04] group-hover:to-transparent transition-all duration-500 pointer-events-none rounded-2xl"></div>
+
+                                <div class="relative flex flex-col items-center py-9 px-6">
+                                    <!-- Icon -->
+                                    <div class="relative mb-4">
+                                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-600/20 border border-blue-500/20 flex items-center justify-center group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-blue-500/10 transition-all duration-300">
+                                            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                        </div>
+                                        <!-- Outer ring -->
+                                        <div class="absolute -inset-1.5 rounded-[14px] border border-blue-500/10 group-hover:border-blue-500/25 transition-colors duration-300"></div>
+                                    </div>
+                                    <p class="text-sm font-semibold text-slate-300 group-hover:text-white transition-colors duration-200">Drop CSV file here</p>
+                                    <p class="text-[11px] text-slate-600 mt-1">or click to browse &nbsp;·&nbsp; .csv only</p>
+                                </div>
+                                <input type="file" id="file-input" name="file" accept=".csv" class="hidden">
+                            </div>
+
+                            <!-- File info card (shown after selection) -->
+                            <div id="file-name-display" class="min-w-0">
+                                <!-- File name row -->
+                                <div class="flex items-center gap-3 px-3.5 py-3 rounded-xl border border-white/[0.08] bg-white/[0.025] min-w-0"
+                                     style="box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);">
+                                    <!-- CSV badge -->
+                                    <div class="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                                        <span class="text-[8px] font-black tracking-widest text-blue-400">CSV</span>
+                                    </div>
+                                    <span class="text-sm text-white/70 font-medium flex-1 min-w-0 block overflow-hidden text-ellipsis whitespace-nowrap" title=""></span>
+                                    <button type="button" data-action="clear-file"
+                                            class="p-1 text-slate-600 hover:text-slate-300 hover:bg-white/5 rounded-md transition-all shrink-0" title="Remove">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                </div>
+                                <!-- Stat pills -->
+                                <div class="flex gap-2">
+                                    <div class="stat-pill">
+                                        <span class="stat-pill-label">Rows</span>
+                                        <span class="stat-pill-value" id="file-row-count">—</span>
+                                    </div>
+                                    <div class="stat-pill">
+                                        <span class="stat-pill-label">Size</span>
+                                        <span class="stat-pill-value" id="file-size-stat">—</span>
+                                    </div>
+                                    <div class="stat-pill">
+                                        <span class="stat-pill-label">Status</span>
+                                        <span class="stat-pill-value text-emerald-400" style="font-size:0.75rem;">Ready</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Submit -->
+                            <button type="submit" class="w-full h-11 btn-gradient text-xs font-bold uppercase tracking-widest text-white rounded-xl transition-all active:scale-[0.98] hover:opacity-90 shadow-lg shadow-blue-500/10">
+                                Ingest Dataset
+                            </button>
+
+                            <!-- Progress -->
+                            <progress id="progress" value="0" max="100" class="htmx-indicator w-full h-1 rounded-full"></progress>
+                        </form>
+
+                        <!-- Upload result -->
+                        <div id="upload-result"></div>
+
+                        <!-- Format guide -->
+                        <div class="pt-4 border-t border-white/[0.06]">
+                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-700 mb-3">Expected Columns</p>
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600"><span class="w-1 h-1 rounded-full bg-slate-700 shrink-0"></span>Daily Date</div>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600"><span class="w-1 h-1 rounded-full bg-slate-700 shrink-0"></span>Share Code</div>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600"><span class="w-1 h-1 rounded-full bg-slate-700 shrink-0"></span>Year High</div>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600"><span class="w-1 h-1 rounded-full bg-slate-700 shrink-0"></span>Year Low</div>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600"><span class="w-1 h-1 rounded-full bg-slate-700 shrink-0"></span>Shares Traded</div>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600"><span class="w-1 h-1 rounded-full bg-slate-700 shrink-0"></span>Value Traded</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Preview Panel -->
+                <div class="flex-1 flex flex-col overflow-hidden">
+
+                    <!-- Preview toolbar -->
+                    <div class="h-12 shrink-0 flex items-center justify-between px-5 border-b border-white/5">
+                        <div class="flex items-center gap-3">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-slate-600">Data Frame</span>
+                            <span id="preview-stats" class="text-[10px] text-slate-700 font-medium hidden"></span>
+                        </div>
+                        <div id="preview-header" class="hidden items-center gap-1 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.07]">
+                            <button data-action="set-preview-mode" data-arg="top" id="btn-top"
+                                    class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all active">
+                                Head
+                            </button>
+                            <button data-action="set-preview-mode" data-arg="bottom" id="btn-bottom"
+                                    class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all text-slate-500">
+                                Tail
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Preview content -->
+                    <div class="flex-1 relative overflow-hidden">
+                        <!-- Table -->
+                        <div id="preview-section" class="absolute inset-0 overflow-auto no-scrollbar hidden">
+                            <div id="preview-container"></div>
+                        </div>
+
+                        <!-- Empty state -->
+                        <div id="preview-empty" class="absolute inset-0 flex flex-col items-center justify-center gap-5 select-none">
+                            <!-- Animated dot grid -->
+                            <div class="relative w-40 h-28 opacity-[0.06]"
+                                 style="background-image: radial-gradient(rgba(148,163,184,0.8) 1.5px, transparent 1.5px); background-size: 18px 18px;">
+                                <!-- Header row highlight -->
+                                <div class="absolute top-0 inset-x-0 h-5 bg-blue-400/30 rounded-sm"></div>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-sm font-semibold text-slate-600">No file selected</p>
+                                <p class="text-[11px] text-slate-700 mt-1.5 leading-relaxed max-w-48">Select a CSV on the left<br>to preview its contents here</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /view-ingestion -->
+
+
+            <!-- ── Users View ───────────────────────────────────────── -->
+            <div id="view-users" class="h-full flex flex-col overflow-hidden hidden">
+
+                <!-- Users toolbar -->
+                <div class="h-12 shrink-0 flex items-center justify-between px-6 border-b border-white/5">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-sm font-bold text-white/90">Identity Manager</h2>
+                        <span class="text-[9px] font-black uppercase tracking-widest text-amber-500/60">Access Control</span>
+                    </div>
+                </div>
+
+                <!-- Table container -->
+                <div id="users-table-container"
+                     hx-get="/v1/admin/users"
+                     hx-trigger="load, users-refresh from:body"
+                     class="flex-1 overflow-auto no-scrollbar">
+                    <!-- Loading spinner -->
+                    <div class="flex items-center justify-center p-16">
+                        <div class="w-6 h-6 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+                    </div>
+                </div>
+            </div><!-- /view-users -->
+
+            <!-- ── Audit View ───────────────────────────────────────── -->
+            <div id="view-audit" class="h-full flex flex-col overflow-hidden hidden">
+
+                <!-- Toolbar -->
+                <div class="h-12 shrink-0 flex items-center justify-between px-6 border-b border-white/5">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-sm font-bold text-white/90">Audit Log</h2>
+                        <span class="text-[9px] font-black uppercase tracking-widest text-purple-400/60">Compliance Trail</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input id="audit-filter"
+                               type="text"
+                               placeholder="Filter by actor, action, target…"
+                               class="w-72 h-8 bg-white/[0.03] border border-white/10 rounded-lg px-3 text-xs font-medium text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500/40 transition-colors">
+                        <button data-action="audit-refresh"
+                                class="h-8 px-3 flex items-center gap-1.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white transition-all">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stat strip -->
+                <div class="grid grid-cols-4 gap-3 p-6 pb-3">
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Total Entries</p>
+                        <p id="audit-stat-total" class="text-lg font-bold text-white">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">User Actions</p>
+                        <p id="audit-stat-user" class="text-lg font-bold text-amber-400">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Auth Events</p>
+                        <p id="audit-stat-auth" class="text-lg font-bold text-emerald-400">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Latest Activity</p>
+                        <p id="audit-stat-latest" class="text-xs font-bold text-slate-300">—</p>
+                    </div>
+                </div>
+
+                <!-- Audit table -->
+                <div class="flex-1 overflow-auto no-scrollbar px-6 pb-6">
+                    <div class="rounded-2xl border border-white/5 bg-white/[0.015] overflow-hidden">
+                        <!-- Column header -->
+                        <div class="audit-row" style="background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Timestamp</div>
+                            <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Actor</div>
+                            <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Action</div>
+                            <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Target / Metadata</div>
+                        </div>
+                        <div id="audit-table-container"
+                             hx-get="/v1/admin/audit"
+                             hx-trigger="load, refresh"
+                             hx-swap="innerHTML">
+                            <div class="flex items-center justify-center p-16">
+                                <div class="w-6 h-6 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /view-audit -->
+
+            <!-- ── Alerts View ──────────────────────────────────────── -->
+            <div id="view-alerts" class="h-full flex flex-col overflow-hidden hidden">
+
+                <!-- Toolbar -->
+                <div class="h-12 shrink-0 flex items-center justify-between px-6 border-b border-white/5">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-sm font-bold text-white/90">Watchlist Alerts</h2>
+                        <span class="text-[9px] font-black uppercase tracking-widest text-rose-400/70">Rule &amp; Fire Overview</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input id="alerts-filter"
+                               type="text"
+                               placeholder="Filter by symbol, user, metric…"
+                               class="w-72 h-8 bg-white/[0.03] border border-white/10 rounded-lg px-3 text-xs font-medium text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-rose-500/40 transition-colors">
+                        <button data-action="alerts-refresh"
+                                class="h-8 px-3 flex items-center gap-1.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white transition-all">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stat strip — 5 cards, tracks the AlertStats shape -->
+                <div class="grid grid-cols-5 gap-3 p-6 pb-3">
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Total Rules</p>
+                        <p id="alerts-stat-total" class="text-lg font-bold text-white">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Armed</p>
+                        <p id="alerts-stat-active" class="text-lg font-bold text-emerald-400">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Unique Users</p>
+                        <p id="alerts-stat-users" class="text-lg font-bold text-amber-400">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Fires Today</p>
+                        <p id="alerts-stat-today" class="text-lg font-bold text-rose-400">—</p>
+                    </div>
+                    <div class="audit-stat-card">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-1">Fires 7d</p>
+                        <p id="alerts-stat-week" class="text-lg font-bold text-slate-300">—</p>
+                    </div>
+                </div>
+
+                <!-- Split body: rules (top 60%) + recent fires (bottom 40%) -->
+                <div class="flex-1 overflow-auto no-scrollbar px-6 pb-6 flex flex-col gap-5 min-h-0">
+
+                    <!-- Rules table -->
+                    <div class="flex flex-col min-h-0">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-500">Rules</h3>
+                            <span id="alerts-rules-count" class="text-[9px] text-slate-600 mono">—</span>
+                        </div>
+                        <div class="rounded-2xl border border-white/5 bg-white/[0.015] overflow-hidden flex flex-col min-h-0">
+                            <!-- Column header -->
+                            <div class="alert-row" style="background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.06);">
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Symbol</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Metric</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Predicate</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Owner</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Last Fired</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">State</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600 text-right">Action</div>
+                            </div>
+                            <div id="alerts-rules-body" class="overflow-y-auto no-scrollbar max-h-[50vh]">
+                                <div class="flex items-center justify-center p-10">
+                                    <div class="w-5 h-5 border-2 border-rose-500/20 border-t-rose-500 rounded-full animate-spin"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent fires -->
+                    <div class="flex flex-col min-h-0">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-500">Recent Fires</h3>
+                            <span id="alerts-events-count" class="text-[9px] text-slate-600 mono">—</span>
+                        </div>
+                        <div class="rounded-2xl border border-white/5 bg-white/[0.015] overflow-hidden flex flex-col min-h-0">
+                            <div class="event-row" style="background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.06);">
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Timestamp</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Symbol</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Metric</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Observed</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Predicate</div>
+                                <div class="text-[9px] font-black uppercase tracking-widest text-slate-600">Owner</div>
+                            </div>
+                            <div id="alerts-events-body" class="overflow-y-auto no-scrollbar max-h-[40vh]">
+                                <div class="flex items-center justify-center p-10">
+                                    <div class="w-5 h-5 border-2 border-rose-500/20 border-t-rose-500 rounded-full animate-spin"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div><!-- /view-alerts -->
+
+            <!-- ── Pro Requests View ────────────────────────────────── -->
+            <div id="view-pro-requests" class="h-full flex flex-col overflow-hidden hidden">
+
+                <!-- Toolbar -->
+                <div class="h-12 shrink-0 flex items-center justify-between px-6 border-b border-white/5">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-sm font-bold text-white/90">Pro Requests</h2>
+                        <span class="text-[9px] font-black uppercase tracking-widest text-amber-400/70">User-initiated upgrades</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button data-action="pro-requests-refresh"
+                                class="h-8 px-3 flex items-center gap-1.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white transition-all">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Body — rendered fully client-side from JSON. The
+                     `data-pro-requests-body` hook is what features/admin.js
+                     targets after each fetch / WS frame. -->
+                <div class="flex-1 overflow-auto no-scrollbar p-6">
+                    <div id="pro-requests-body" data-pro-requests-body
+                         class="rounded-2xl border border-white/5 bg-white/[0.015] overflow-hidden">
+                        <div class="flex items-center justify-center p-16">
+                            <div class="w-6 h-6 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /view-pro-requests -->
+
+        </main>
+    </div><!-- /shell -->
+    </div><!-- /max-width wrapper -->
+
+
+    <!-- ── Password Reset Modal ──────────────────────────────────────── -->
+    <div id="password-reset-modal"
+         class="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-200">
+        <div class="max-w-sm w-full mx-4 glass rounded-2xl p-7 border border-white/10 shadow-2xl transform scale-95 transition-transform duration-200">
+            <div class="flex items-start justify-between mb-5">
+                <div>
+                    <h3 class="text-base font-bold text-white">Reset Password</h3>
+                    <p id="reset-user-display" class="text-xs text-slate-500 mt-0.5">User: —</p>
+                </div>
+                <button type="button" data-action="close-reset-modal"
+                        class="p-1.5 text-slate-600 hover:text-slate-400 hover:bg-white/5 rounded-lg transition-all -mr-1 -mt-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <form id="reset-password-form" hx-post="" hx-target="#reset-status" class="space-y-4">
+                <div class="space-y-1.5">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">New Password</label>
+                    <input type="password" name="password" required placeholder="••••••••"
+                           class="w-full h-11 input-glass rounded-xl px-4 text-sm focus:outline-none focus:border-blue-500/50 transition-all font-medium tracking-wider border border-white/10">
+                </div>
+                <div id="reset-status" class="min-h-4 text-xs"></div>
+                <div class="flex gap-2 pt-1">
+                    <button type="button" data-action="close-reset-modal"
+                            class="flex-1 h-10 rounded-xl text-xs font-bold text-slate-400 hover:bg-white/5 border border-white/10 transition-all">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="flex-1 h-10 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all">
+                        Update Password
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/htmx.org@2.0.8/dist/htmx.min.js"
+            integrity="sha384-/TgkGk7p307TH7EXJDuUlgG3Ce1UVolAOFopFekQkkXihi5u/6OCvVKyz1W+idaz"
+            crossorigin="anonymous"></script>
+    <script type="module" src="/src/features/admin.js"></script>
+</body>
+</html>

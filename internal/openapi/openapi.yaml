@@ -1,0 +1,783 @@
+# ══════════════════════════════════════════════════════════════════════════
+# GSE Terminal — Public API specification (OpenAPI 3.1)
+#
+# Authoritative source of truth for the /v1 surface exposed to third-party
+# developers. Served at /v1/openapi.yaml and /v1/openapi.json, and rendered
+# interactively at /developers/swagger.
+#
+# Only endpoints intended for external consumption are listed here:
+#   · Market data              (public)
+#   · Analytics & the Oracle   (Pro/Admin)
+#   · Caller identity + watchlist + alerts  (authenticated)
+#   · API-key management       (authenticated)
+#
+# Internal endpoints (/v1/admin/*, /v1/client-error, /auth/*) are
+# deliberately omitted — they're operational, not a product surface.
+# ══════════════════════════════════════════════════════════════════════════
+openapi: 3.1.0
+
+info:
+  title: GSE Terminal API
+  version: "1.0.0"
+  summary: Programmatic access to the Ghana Stock Exchange wire.
+  description: |
+    Every figure on the GSE Terminal — each tick, close, sentiment score
+    and sector aggregate — is available over HTTPS as JSON under the
+    `/v1` path.
+
+    ## Authentication
+
+    Most endpoints require a bearer token in the `Authorization` header:
+
+    ```
+    Authorization: Bearer ges_live_...
+    ```
+
+    Keys are provisioned from **Terminal → Account → API keys** and are
+    shown only at creation time. A session cookie works equivalently when
+    the call originates from a browser signed into the Terminal.
+
+    ## Rate budget
+
+    - 60 requests per minute, per IP, across the whole surface.
+    - LLM endpoints (`/v1/ai-insight`, `/v1/query`) are additionally
+      capped at 10 requests per minute, per authenticated user.
+    - Exceeding either budget returns `429` with an exponential-backoff
+      hint in the response body.
+
+    ## Errors
+
+    Every error response is a JSON body with a single `error` field.
+    The HTTP status is authoritative.
+  contact:
+    name: GSE Terminal
+    url: https://your-host/developers
+  license:
+    name: Proprietary
+    url: https://your-host/terms
+
+servers:
+  - url: https://{host}/v1
+    description: Production
+    variables:
+      host:
+        default: your-host
+        description: Your deployment host.
+  - url: http://localhost:8080/v1
+    description: Local development
+
+tags:
+  - name: Market data
+    description: Quotes, history, batch compare, news and the daily briefing. Keyless.
+  - name: Analytics
+    description: RSI, sentiment and fair-value anchors; sector rollups; natural-language screening. Pro/Admin.
+  - name: User
+    description: Caller identity and watchlist CRUD.
+  - name: Alerts
+    description: Watchlist alert rules with email and in-app delivery. Pro/Admin.
+  - name: Keys
+    description: Provision and revoke bearer keys scoped to your account.
+
+# Default security — a bearer API key. Individual operations that accept
+# no auth override with `security: []`.
+security:
+  - bearerApiKey: []
+  - sessionCookie: []
+
+# ──────────────────────────────────────────────────────────────────────────
+# Paths
+# ──────────────────────────────────────────────────────────────────────────
+paths:
+
+  /history:
+    get:
+      tags: [Market data]
+      operationId: getHistory
+      summary: Fetch OHLC history
+      description: |
+        OHLC bars for a single symbol. Intervals sample the underlying
+        tick stream into candles server-side.
+      security: []
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Ticker (e.g. `MTNGH`).
+          schema: { type: string, example: MTNGH }
+        - name: interval
+          in: query
+          required: true
+          description: Sampling window.
+          schema:
+            type: string
+            enum: [1d, 1w, 1M]
+            example: 1d
+      responses:
+        '200':
+          description: Array of OHLC bars, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OHLCBar' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /compare:
+    get:
+      tags: [Market data]
+      operationId: getCompare
+      summary: Batch OHLC for up to four symbols
+      description: |
+        Four-way compare in a single round-trip. Drives the Terminal's
+        normalised overlay chart.
+      security: []
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          description: Comma-separated tickers, max four.
+          schema:
+            type: string
+            example: MTNGH,GCB,FML
+        - name: interval
+          in: query
+          required: false
+          description: Defaults to `1d`.
+          schema:
+            type: string
+            enum: [1d, 1w, 1M]
+            default: 1d
+      responses:
+        '200':
+          description: Map of symbol → OHLC series.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { $ref: '#/components/schemas/OHLCBar' }
+                example:
+                  MTNGH:
+                    - { timestamp: '2026-04-10T15:30:00Z', close: 1.50 }
+                    - { timestamp: '2026-04-14T15:30:00Z', close: 1.54 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /symbols:
+    get:
+      tags: [Market data]
+      operationId: getSymbols
+      summary: All listed symbols
+      description: Every ticker listed on the exchange. Updated as the collector ingests the daily feed.
+      security: []
+      responses:
+        '200':
+          description: Array of ticker symbols.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+                example: [ACCESS, CAL, EGH, ETI, FML, GCB, GOIL, MTNGH, SCB, SOGEGH, TBL, TOTAL, UNIL]
+
+  /market-summary:
+    get:
+      tags: [Market data]
+      operationId: getMarketSummary
+      summary: Latest market snapshot
+      description: One row per listed symbol with last price, % change, and session volume.
+      security: []
+      responses:
+        '200':
+          description: Array of per-symbol snapshots.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MarketSnapshot' }
+
+  /briefing:
+    get:
+      tags: [Market data]
+      operationId: getBriefing
+      summary: Daily AI briefing
+      description: |
+        The most recent AI-written market roll-up plus per-symbol verdicts
+        for the session's most active tickers.
+      security: []
+      responses:
+        '200':
+          description: Briefing envelope with per-symbol insights.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Briefing' }
+
+  /news:
+    get:
+      tags: [Market data]
+      operationId: getTickerNews
+      summary: Ticker news feed
+      description: |
+        Recent headlines for a ticker, each scored with a recency-weighted
+        sentiment value in `[-1, +1]`.
+      security: []
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Ticker to fetch headlines for.
+          schema: { type: string, example: MTNGH }
+      responses:
+        '200':
+          description: Array of scored headlines.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/NewsItem' }
+
+  /market-news:
+    get:
+      tags: [Market data]
+      operationId: getMarketNews
+      summary: Market-wide news feed
+      description: Market-wide headlines (no ticker scope). Uses the same scoring pipeline as `/news`.
+      security: []
+      responses:
+        '200':
+          description: Array of scored headlines.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/NewsItem' }
+
+  /ai-insight:
+    get:
+      tags: [Analytics]
+      operationId: getAIInsight
+      summary: AI Market Oracle verdict
+      description: |
+        RSI, ATR, sentiment, fair-value anchor and a short LLM-written
+        consensus for a single ticker. Budgeted at **10 rpm per user**.
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Ticker.
+          schema: { type: string, example: MTNGH }
+      responses:
+        '200':
+          description: Oracle verdict envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AIInsight' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market-sectors:
+    get:
+      tags: [Analytics]
+      operationId: getMarketSectors
+      summary: Turnover-weighted sector rollup
+      description: Average % change, total volume, breadth counts, and top-gainer / worst-loser per sector.
+      parameters:
+        - name: detail
+          in: query
+          required: false
+          description: Pass `summary` to drop the `constituents` array (~70% smaller payload).
+          schema:
+            type: string
+            enum: [summary, full]
+            default: full
+      responses:
+        '200':
+          description: Array of sector rollups.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SectorRollup' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /query:
+    post:
+      tags: [Analytics]
+      operationId: naturalQuery
+      summary: Natural-language screen
+      description: |
+        Plain-text questions resolved against a whitelisted SQL surface.
+        Budgeted at **10 rpm per user**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  description: Plain-English query. Max 16 KiB.
+                  example: Banks with RSI below 35 and positive YTD return
+      responses:
+        '200':
+          description: Resolved rows with the generated SQL for audit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /me:
+    get:
+      tags: [User]
+      operationId: getMe
+      summary: Caller identity
+      description: Username, role, email + verification state, linked OAuth provider, password state.
+      responses:
+        '200':
+          description: Identity envelope. Fields beyond `isAuthenticated` are present only for signed-in callers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MeResponse' }
+
+  /watchlist:
+    get:
+      tags: [User]
+      operationId: getWatchlist
+      summary: Caller's watchlist
+      description: Starred symbols with the latest market snapshot joined on.
+      responses:
+        '200':
+          description: Watchlist envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchlistResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [User]
+      operationId: toggleWatchlist
+      summary: Add or remove a symbol from the watchlist
+      description: Idempotent toggle — posting the same symbol twice returns it to its previous state.
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Ticker to toggle.
+          schema: { type: string, example: MTNGH }
+      responses:
+        '200':
+          description: New membership state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [isWatchlisted]
+                properties:
+                  isWatchlisted: { type: boolean }
+                example: { isWatchlisted: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/alerts:
+    get:
+      tags: [Alerts]
+      operationId: listAlertRules
+      summary: List watchlist alert rules
+      description: All rules belonging to the caller — armed and paused. A rule fires at most once before going to paused.
+      responses:
+        '200':
+          description: Array of alert rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AlertRule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Alerts]
+      operationId: createAlertRule
+      summary: Create a watchlist alert
+      description: |
+        Requires a verified email on the caller's account. Returns `403`
+        if the email is unverified even for Pro callers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRuleInput' }
+      responses:
+        '201':
+          description: The new rule's ID.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: integer, format: int64, example: 143 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /me/alerts/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Rule ID.
+        schema: { type: integer, format: int64, example: 143 }
+    patch:
+      tags: [Alerts]
+      operationId: updateAlertRule
+      summary: Update an alert rule
+      description: Partial update — any subset of `threshold`, `op`, `metric`, `enabled` may be present.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                threshold: { type: number, example: 1.60 }
+                op:        { type: string, enum: ['>', '<', '>=', '<='] }
+                metric:    { type: string, enum: [price, rsi, pct_change] }
+                enabled:   { type: boolean }
+      responses:
+        '204': { description: Updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Alerts]
+      operationId: deleteAlertRule
+      summary: Delete an alert rule
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me/api-keys:
+    get:
+      tags: [Keys]
+      operationId: listAPIKeys
+      summary: List your API keys
+      description: Only the prefix is stored server-side. The raw key is returned only at creation time.
+      responses:
+        '200':
+          description: Array of API keys (no raw secret).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/APIKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Keys]
+      operationId: createAPIKey
+      summary: Provision a new API key
+      description: The raw `key` field is returned **once**. Store it at the callsite — it cannot be recovered later.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Display label, max 200 characters.
+                  example: screener-bot
+      responses:
+        '200':
+          description: The new key — including the raw secret.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APIKeyWithSecret' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/api-keys/{id}:
+    delete:
+      tags: [Keys]
+      operationId: revokeAPIKey
+      summary: Revoke an API key
+      description: Subsequent requests presenting this key return `401`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Key ID.
+          schema: { type: integer, format: int64, example: 3 }
+      responses:
+        '200':
+          description: Revocation confirmation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+# ──────────────────────────────────────────────────────────────────────────
+# Components
+# ──────────────────────────────────────────────────────────────────────────
+components:
+
+  securitySchemes:
+    bearerApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: ges_live_*
+      description: |
+        Provision a key from **Terminal → Account → API keys**. The raw
+        secret is shown only at creation time.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: JWT-backed session cookie issued by `/login`. Equivalent to a bearer key for browser-originated calls.
+
+  responses:
+    BadRequest:
+      description: Missing or malformed parameter.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "symbol is required" }
+    Unauthorized:
+      description: Missing or invalid bearer token / session cookie.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "unauthorized" }
+    Forbidden:
+      description: Authenticated but not Pro/Admin on a Pro-only endpoint, or no verified email for alerts.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "pro access required" }
+    NotFound:
+      description: No such resource, or not owned by the caller.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "not found" }
+    Conflict:
+      description: Rule limit exceeded, duplicate, or conflicting state.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "alert rule limit exceeded" }
+    RateLimited:
+      description: Per-IP or per-user rate budget exhausted. Back off exponentially.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "rate limit exceeded" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: Human-readable error message. }
+
+    OHLCBar:
+      type: object
+      required: [timestamp, close]
+      properties:
+        timestamp: { type: string, format: date-time, example: '2026-04-14T15:30:00Z' }
+        open:      { type: number, example: 1.50 }
+        high:      { type: number, example: 1.55 }
+        low:       { type: number, example: 1.50 }
+        close:     { type: number, example: 1.54 }
+        volume:    { type: integer, format: int64, example: 211800 }
+
+    MarketSnapshot:
+      type: object
+      required: [symbol, lastPrice]
+      properties:
+        symbol:        { type: string, example: MTNGH }
+        openPrice:     { type: number, example: 1.50 }
+        lastPrice:     { type: number, example: 1.54 }
+        priceChange:   { type: number, example: 0.04 }
+        percentChange: { type: number, example: 2.67 }
+        volume:        { type: integer, format: int64, example: 211800 }
+
+    NewsItem:
+      type: object
+      required: [title]
+      properties:
+        title:       { type: string, example: 'MTN Ghana posts Q1 subscriber gains, lifts data revenue 18%' }
+        source:      { type: string, example: 'Business Day GH' }
+        publishedAt: { type: string, format: date-time, example: '2026-04-14T08:12:00Z' }
+        sentiment:
+          type: number
+          description: Recency-weighted score in `[-1, +1]`.
+          minimum: -1
+          maximum: 1
+          example: 0.62
+
+    Briefing:
+      type: object
+      properties:
+        tradingDate:      { type: string, format: date, nullable: true, example: '2026-04-14' }
+        summary:          { type: string, nullable: true, example: 'Financials extended a three-session advance as MTNGH tagged a fresh YTD high…' }
+        averageSentiment: { type: number, example: 0.31 }
+        insights:
+          type: array
+          items:
+            type: object
+            properties:
+              symbol:    { type: string }
+              verdict:   { type: string, enum: [Oversold, Bearish, Neutral, Bullish, Overbought, Extreme overbought] }
+              rsi:       { type: number }
+              sentiment: { type: number }
+
+    AIInsight:
+      type: object
+      required: [symbol, signal]
+      properties:
+        symbol:         { type: string, example: MTNGH }
+        signal:         { type: string, enum: [BULLISH, BEARISH, NEUTRAL], example: BULLISH }
+        confidence:     { type: integer, minimum: 0, maximum: 100, example: 78 }
+        suggestedPrice: { type: number, example: 1.48 }
+        fairValue:      { type: number, example: 1.43 }
+        sentiment:      { type: number, example: 0.71 }
+        sentimentLabel: { type: string, example: Positive }
+        rsi:            { type: number, example: 62.4 }
+        atr:            { type: number, example: 0.084 }
+        aboveSMA50:     { type: boolean, example: true }
+        aboveSMA20:     { type: boolean, example: true }
+        sampleSize:     { type: integer, example: 62 }
+        analysis:       { type: string, example: 'Constructive setup: price holds above both moving averages…' }
+
+    SectorRollup:
+      type: object
+      required: [sector]
+      properties:
+        sector:          { type: string, example: Financials }
+        avgPctChange:    { type: number, example: 1.14 }
+        totalVolume:     { type: integer, format: int64, example: 412600 }
+        totalTurnover:   { type: number, example: 2814500.0 }
+        advanceCount:    { type: integer, example: 6 }
+        declineCount:    { type: integer, example: 2 }
+        neutralCount:    { type: integer, example: 1 }
+        topGainer:       { $ref: '#/components/schemas/SectorMover' }
+        worstLoser:      { $ref: '#/components/schemas/SectorMover' }
+        constituents:
+          type: array
+          description: Omitted when the `detail=summary` query flag is set.
+          items: { $ref: '#/components/schemas/MarketSnapshot' }
+
+    SectorMover:
+      type: object
+      properties:
+        symbol:        { type: string, example: GCB }
+        percentChange: { type: number, example: 2.18 }
+
+    QueryResponse:
+      type: object
+      required: [rows]
+      properties:
+        question:     { type: string, description: Echo of the submitted question. }
+        generatedSQL: { type: string, description: The whitelisted SQL the LLM resolved to. }
+        columns:
+          type: array
+          items: { type: string }
+          example: [symbol, rsi, ytd_return, last_price]
+        rows:
+          type: array
+          description: Row-major result set. Each element is an array aligned with `columns`.
+          items:
+            type: array
+            items: {}
+          example:
+            - [GCB, 31.2, 4.7, 6.92]
+            - [SCB, 28.9, 1.3, 21.25]
+
+    MeResponse:
+      type: object
+      required: [isAuthenticated]
+      properties:
+        isAuthenticated: { type: boolean }
+        username:        { type: string, example: accra_trader }
+        role:            { type: string, enum: [basic, pro, admin], example: pro }
+        isAdmin:         { type: boolean, example: false }
+        email:           { type: string, format: email, example: 'trader@example.com' }
+        emailVerified:   { type: boolean, example: true }
+        hasPassword:     { type: boolean, example: true }
+        provider:        { type: string, example: google }
+        providerEmail:   { type: string, format: email, example: 'trader@example.com' }
+        availableProviders:
+          type: array
+          items:
+            type: object
+            properties:
+              name:        { type: string, example: google }
+              displayName: { type: string, example: Google }
+
+    WatchlistResponse:
+      type: object
+      required: [symbols]
+      properties:
+        symbols:
+          type: array
+          items: { type: string }
+          example: [MTNGH, GCB, FML]
+        details:
+          type: array
+          items: { $ref: '#/components/schemas/MarketSnapshot' }
+
+    AlertRuleInput:
+      type: object
+      required: [symbol, metric, op, threshold]
+      properties:
+        symbol:    { type: string, example: MTNGH }
+        metric:    { type: string, enum: [price, rsi, pct_change], example: price }
+        op:        { type: string, enum: ['>', '<', '>=', '<='], example: '>' }
+        threshold: { type: number, example: 1.50 }
+
+    AlertRule:
+      allOf:
+        - $ref: '#/components/schemas/AlertRuleInput'
+        - type: object
+          required: [id, userId, enabled, fireCount]
+          properties:
+            id:          { type: integer, format: int64, example: 142 }
+            userId:      { type: integer, format: int64, example: 9 }
+            enabled:     { type: boolean, example: false }
+            lastFiredAt: { type: string, format: date-time, nullable: true, example: '2026-04-14T15:31:02Z' }
+            fireCount:   { type: integer, example: 1 }
+
+    APIKey:
+      type: object
+      required: [id, prefix]
+      properties:
+        id:         { type: integer, format: int64, example: 3 }
+        prefix:     { type: string, description: First few characters of the key, shown for recognition., example: 'ges_live_aZ8k' }
+        name:       { type: string, example: my-laptop }
+        createdAt:  { type: string, format: date-time, example: '2026-03-22T10:12:00Z' }
+        lastUsedAt: { type: string, format: date-time, nullable: true, example: '2026-04-14T09:40:00Z' }
+
+    APIKeyWithSecret:
+      allOf:
+        - $ref: '#/components/schemas/APIKey'
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: The raw secret. Returned **only** from this endpoint, **only** at creation time.
+              example: ges_live_qR4v9n8xK2pLm1dC5wY3zH7vE6tB0sJ4uA8iO

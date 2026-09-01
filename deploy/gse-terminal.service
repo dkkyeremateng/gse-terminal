@@ -1,0 +1,34 @@
+# systemd unit for the GSE Terminal stack on a single VM.
+#
+#   sudo cp deploy/gse-terminal.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gse-terminal
+#
+# Compose's `restart: unless-stopped` already brings containers back after a
+# crash or a Docker restart, but it does nothing if Docker itself never
+# starts. This unit is what makes the stack come up after a VM reboot, and
+# it gives you `systemctl status/stop/restart gse-terminal` as the single
+# control surface.
+[Unit]
+Description=GSE Terminal (Docker Compose stack)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/gse-terminal
+EnvironmentFile=/opt/gse-terminal/.env
+
+# Pull first so a restart picks up a newer image if one was pushed; failure
+# is tolerated so the stack still starts when the registry is unreachable.
+ExecStartPre=-/usr/bin/docker compose -f docker-compose.yaml -f docker-compose.prod.yaml pull --quiet
+ExecStart=/usr/bin/docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f docker-compose.yaml -f docker-compose.prod.yaml down
+ExecReload=/usr/bin/docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d --build
+
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

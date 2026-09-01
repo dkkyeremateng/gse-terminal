@@ -1,0 +1,37 @@
+[
+  {
+    "name": "keep-recent-tagged",
+    "action": {"type": "Keep"},
+    "condition": {
+      "tagState": "TAGGED",
+      "olderThan": "7776000s"
+    },
+    "mostRecentVersions": {
+      "keepCount": 10
+    }
+  },
+  {
+    "name": "keep-release-tags",
+    "action": {"type": "Keep"},
+    "condition": {
+      "tagState": "TAGGED",
+      "tagPrefixes": ["prod-", "v", "release-"]
+    }
+  },
+  {
+    "name": "delete-untagged-after-7d",
+    "action": {"type": "Delete"},
+    "condition": {
+      "tagState": "UNTAGGED",
+      "olderThan": "604800s"
+    }
+  },
+  {
+    "name": "delete-old-tagged",
+    "action": {"type": "Delete"},
+    "condition": {
+      "tagState": "TAGGED",
+      "olderThan": "7776000s"
+    }
+  }
+]

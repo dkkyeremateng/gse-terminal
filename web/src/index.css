@@ -1,0 +1,128 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+@import './styles/tokens.css';
+
+@custom-variant dark (&:where(:root:not(.light), :root:not(.light) *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-foreground-muted: hsl(var(--foreground-muted));
+  --color-foreground-subtle: hsl(var(--foreground-subtle));
+  --color-surface: hsl(var(--surface));
+  --color-surface-elevated: hsl(var(--surface-elevated));
+  --color-border: hsl(var(--border));
+  --color-border-strong: hsl(var(--border-strong));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-gain: hsl(var(--gain));
+  --color-gain-foreground: hsl(var(--gain-foreground));
+  --color-loss: hsl(var(--loss));
+  --color-loss-foreground: hsl(var(--loss-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+
+  --radius-sm: var(--radius-sm);
+  --radius: var(--radius);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    margin: 0;
+  }
+  /* Tabular numerics for prices & data tables */
+  .tabular,
+  [data-tabular] {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+  }
+  ::selection {
+    background-color: hsl(var(--primary) / 0.3);
+  }
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* Price flash — used by PriceCell on WS update */
+@keyframes flash-gain {
+  0% { background-color: hsl(var(--gain) / 0.25); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-loss {
+  0% { background-color: hsl(var(--loss) / 0.25); }
+  100% { background-color: transparent; }
+}
+.flash-gain { animation: flash-gain 600ms var(--ease-out); }
+.flash-loss { animation: flash-loss 600ms var(--ease-out); }
+
+/* Dialog / Popover open-close animations — shared by all Radix overlays */
+@keyframes overlay-in   { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-out  { from { opacity: 1; } to { opacity: 0; } }
+@keyframes content-in   { from { opacity: 0; transform: translate(-50%, -8px) scale(0.97); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes content-out  { from { opacity: 1; transform: translate(-50%, 0) scale(1); } to { opacity: 0; transform: translate(-50%, -8px) scale(0.97); } }
+@keyframes menu-in      { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes menu-out     { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+
+[data-state='open'][data-overlay] { animation: overlay-in 150ms var(--ease-out); }
+[data-state='closed'][data-overlay] { animation: overlay-out 120ms var(--ease-in); }
+[data-state='open'][data-dialog-content] { animation: content-in 180ms var(--ease-out); }
+[data-state='closed'][data-dialog-content] { animation: content-out 140ms var(--ease-in); }
+[data-state='open'][data-menu-content] { animation: menu-in 140ms var(--ease-out); }
+[data-state='closed'][data-menu-content] { animation: menu-out 100ms var(--ease-in); }
+
+/* Marquee — ticker tape */
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.marquee-track {
+  animation: marquee 60s linear infinite;
+  will-change: transform;
+}
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track,
+.marquee[data-paused='true'] .marquee-track {
+  animation-play-state: paused;
+}

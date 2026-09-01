@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSE Terminal - Ghana Stock Exchange Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Preload the fonts CSS at high priority so the browser kicks off the
+         download as soon as the <head> is parsed instead of after the JS
+         module loads. The matching <link rel="stylesheet"> below reuses
+         the preload cache — net effect: Fraunces (brand serif) appears
+         a few hundred ms sooner on first paint. -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+    <meta name="user-role" content="{{.UserRole}}">
+    <script type="module" src="/static/app.js"></script>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <!-- PWA surface — manifest for the install banner, theme-color for
+         the browser chrome bar on mobile. Service worker registration
+         lives in app.js so the same handler covers dev + prod builds. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b0a08">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="GSE Terminal">
+    <link rel="apple-touch-icon" href="/favicon.png">
+</head>
+<body class="lg:h-screen flex flex-col transition-colors duration-500 lg:overflow-hidden">
+    
+    <!-- Premium Connection Lost Overlay -->
+    <div id="connectivity-overlay" class="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/40 backdrop-blur-md opacity-0 pointer-events-none transition-all duration-700">
+        <div class="max-w-md w-full mx-4 p-8 glass-card rounded-[2rem] border-rose-500/20 shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95 duration-500">
+            <div class="w-20 h-20 bg-rose-500/10 rounded-3xl flex items-center justify-center mb-6 relative">
+                <div class="absolute inset-0 bg-rose-500/20 blur-xl rounded-full animate-pulse"></div>
+                <svg class="w-10 h-10 text-rose-500 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                </svg>
+            </div>
+            <h2 class="text-xl font-display font-bold text-white mb-2 leading-tight">Terminal Link Interrupted</h2>
+            <p class="text-sm text-slate-400 mb-8 leading-relaxed font-light">Real-time GSE synchronization has been paused. Attempting to re-establish the data bridge...</p>
+            <div class="flex items-center gap-2 mb-8">
+                <div class="w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"></div>
+                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-rose-500">Reconnection in Progress</span>
+            </div>
+            <button data-action="reload-page" class="w-full h-12 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-xs font-bold uppercase tracking-widest text-slate-300 transition-all active:scale-95">
+                Force Manual Uplink
+            </button>
+        </div>
+    </div>
+
+    <div class="w-full max-w-[1700px] mx-auto flex flex-col h-full flex-1 lg:overflow-hidden relative shadow-2xl shadow-black/50">
+    <!-- Top Navigation — same masthead language as landing.html -->
+    <nav class="h-16 flex items-center justify-between px-4 lg:px-8 border-b border-[var(--hair-strong)] glass z-[100] sticky top-0">
+
+        <div class="flex items-center gap-4 shrink-0">
+            <div class="gse-mark"><div></div></div>
+            <div class="leading-none">
+                <h1 class="hidden sm:block serif text-xl font-black tracking-tight text-[var(--paper)]">GSE<span class="text-[var(--amber)]">·</span>Terminal</h1>
+                <div id="nav-status" class="flex items-center gap-1.5 mt-1.5">
+                    <div id="nav-status-dot" class="w-1.5 h-1.5 rounded-full bg-[var(--paper)]/40 animate-pulse"></div>
+                    <span id="nav-status-text" class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/60">Syncing</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 lg:gap-3 ml-auto">
+            <!-- Dynamic Admin Link -->
+            <a id="admin-link" href="/admin" class="hidden items-center gap-2 mono text-[11px] uppercase tracking-[0.2em] px-4 py-2 border border-[var(--amber)] text-[var(--amber)] hover:bg-[var(--amber)] hover:text-[var(--ink)] transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                <span class="hidden sm:inline">Admin</span>
+            </a>
+
+            <button data-action="toggle-theme" class="hidden p-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" title="Toggle theme">
+                <svg id="theme-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <!-- Moon Icon -->
+                    <path class="moon-path" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    <!-- Sun Icon -->
+                    <path class="sun-path hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M14.5 12a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+                </svg>
+            </button>
+
+            <!-- Dynamic User Control -->
+            <div id="user-controls" class="flex items-center gap-1">
+                <a href="/login" id="login-nav-btn" class="hidden mono text-[10px] sm:text-[11px] uppercase tracking-[0.18em] sm:tracking-[0.2em] px-3 sm:px-4 py-2 bg-[var(--amber)] text-[var(--ink)] hover:bg-[var(--paper)] transition whitespace-nowrap">
+                    Sign in
+                </a>
+
+                <!-- Settings link — shown for any authenticated user.
+                     Links to /settings where account / alerts / API keys
+                     now live as a dedicated page (previously a modal on
+                     this same nav). The amber dot pseudo-element fires
+                     when data-needs-attention="true" — set by
+                     auth-ticker.js when the user has an unverified email
+                     or other actionable state. -->
+                <a id="account-btn" href="/settings" data-needs-attention="false" class="hidden relative p-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" title="Settings" aria-label="Open settings">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                </a>
+
+                <!-- Alerts bell — shown only for authenticated users (toggled
+                     by features/alerts.js based on window.isUserAuthenticated).
+                     The `data-count` attribute carries the unread count and
+                     drives the amber dot pseudo-element via CSS. -->
+                <button id="alerts-bell-btn" data-action="open-alerts-drawer" data-count="0" class="hidden relative p-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" title="Alerts" aria-label="Open alerts drawer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                </button>
+
+                <!-- OAuth link/unlink buttons removed from the navbar — the
+                     same OAuth-link flow is now reachable from the standalone
+                     #email-verify-modal opened via the link-email button
+                     above, which keeps account-linking actions in one place
+                     instead of duplicated in the toolbar. -->
+
+                <!-- Merge account button (shown for OAuth-only users without a password) -->
+                <button id="merge-account-btn" data-action="show-merge-account-modal" class="hidden p-2 text-slate-500 hover:text-amber-400 transition" title="Link to existing account">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                </button>
+
+                <button id="logout-nav-btn" hx-post="/logout" class="hidden mono text-[11px] uppercase tracking-[0.2em] p-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" title="Sign out">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Ticker tape strip -->
+    <div class="ticker-strip border-b border-[var(--hair-strong)] bg-[var(--ink)]/80 backdrop-blur flex items-stretch text-[11px]">
+        <div class="hidden md:flex items-center gap-2 px-4 border-r border-[var(--hair)] font-mono uppercase tracking-[0.22em] text-[var(--paper)]/55 text-[9px]">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--amber)] pip"></span> Tape
+        </div>
+        <div class="relative overflow-hidden flex-1">
+            <div class="tape-track flex whitespace-nowrap font-mono py-1.5">
+                {{/* Server-rendered ticker — same data + helpers as the
+                     landing page so the marquee is meaningful before any
+                     client-side JS has run. */}}
+                {{if .Ticker}}
+                {{range $pass := .TickerPasses}}
+                <span class="flex items-center" {{if $pass}} aria-hidden="true" {{end}}>
+                    {{range $.Ticker}}
+                    <span class="px-4">{{.Symbol}} <b class="text-[var(--amber)]">{{printf "%.2f" .LastPrice}}</b> {{if gt .PercentChange 0.0}}<span class="text-[var(--moss)]">▲{{printf "%.2f" .PercentChange}}%</span>{{else if lt .PercentChange 0.0}}<span class="text-[var(--rust)]">▼{{printf "%.2f" (neg .PercentChange)}}%</span>{{else}}<span class="text-[var(--paper)]/40">→0.00%</span>{{end}}</span>
+                    {{end}}
+                </span>
+                {{end}}
+                {{else}}
+                <span class="flex items-center px-4 text-[var(--paper)]/40">Awaiting first data ingestion…</span>
+                {{end}}
+            </div>
+            <div class="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-[var(--ink)] to-transparent"></div>
+            <div class="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[var(--ink)] to-transparent"></div>
+        </div>
+        <div class="hidden lg:flex items-center gap-2 px-4 border-l border-[var(--hair)] font-mono uppercase tracking-[0.22em] text-[var(--paper)]/55 text-[9px]">
+            <span class="text-[var(--amber)]">●</span> Open · Accra
+        </div>
+    </div>
+
+    <!-- Mobile section nav (Google Finance style chip bar).
+         These are hash-anchor navigation links, not ARIA tabs — no
+         corresponding tabpanel regions exist. Rendering with <nav> and
+         aria-label lets screen readers announce them as a navigation
+         landmark. -->
+    <nav class="mobile-section-nav lg:hidden" aria-label="Sections">
+        <a href="#home" class="mobile-tab" data-action="clear-selected-stock">Home</a>
+        <a href="#news" class="mobile-tab" data-no-stock>News</a>
+        <a href="#movers" class="mobile-tab" data-no-stock>Movers</a>
+        <a href="#watchlist" class="mobile-tab" data-no-stock>Watchlist</a>
+        <a href="#portfolio" class="mobile-tab" data-no-stock>Portfolio</a>
+    </nav>
+
+    <!-- Search bar (mobile: under section nav; desktop: overlaid into masthead) -->
+    <div class="terminal-search-wrap px-4 py-3 lg:p-0 border-b border-[var(--hair-strong)] lg:border-0 bg-[var(--ink)] lg:bg-transparent">
+        <div class="terminal-search h-11 relative group z-[101] mx-auto max-w-xl">
+            <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                <svg class="w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+            <label for="symbol-search" class="sr-only">Search security or ticker</label>
+            <input type="text" id="symbol-search" placeholder="Search Security or Ticker..." autocomplete="off" spellcheck="false" aria-label="Search security or ticker"
+                class="w-full h-full bg-white/[0.03] border border-white/10 rounded-xl pl-11 pr-4 md:pr-20 text-sm font-medium focus:outline-none focus:border-blue-500/40 transition-all light:bg-slate-100 light:border-slate-200 light:text-slate-900">
+            <div id="symbols-dropdown" class="symbol-dropdown hidden"></div>
+            <div class="absolute right-3 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-1.5 pointer-events-none opacity-40">
+                <kbd class="px-1.5 py-0.5 text-xs bg-slate-800 rounded border border-white/10 font-sans">⌘</kbd>
+                <kbd class="px-1.5 py-0.5 text-xs bg-slate-800 rounded border border-white/10 font-sans">K</kbd>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex-1 flex flex-col lg:flex-row lg:overflow-hidden content-stage">
+
+        <!-- Left Sidebar (Portfolio, Watchlist & Market Movers) -->
+        <aside class="mobile-left-aside flex lg:w-[320px] lg:min-w-[320px] lg:h-full flex-col glass lg:border-r border-white/5 lg:p-6 overflow-y-auto no-scrollbar order-first z-20">
+
+            <!-- Portfolio Panel — first on desktop so the user's positions
+                 are the primary item in the left rail. Hidden for guests
+                 until features/portfolio.js renders the locked/upgrade CTA. -->
+            <span id="portfolio" class="anchor-target"></span>
+            <div id="portfolio-panel" class="mb-8 hidden">
+                <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                    <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                    Portfolio
+                </h3>
+                <div id="portfolio-body">
+                    <!-- Rendered by features/portfolio.js -->
+                </div>
+            </div>
+
+            <!-- Watchlist Panel (Persistent) -->
+            <span id="watchlist" class="anchor-target"></span>
+            <div id="watchlist-panel-container">
+                <div id="watchlist-panel" class="mb-8 hidden">
+                    <button data-action="toggle-collapse" data-target="watchlist-items" class="w-full text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 cursor-pointer hover:text-[var(--amber)] transition group">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        My Watchlist
+                        <svg class="w-3 h-3 ml-auto text-slate-600 group-hover:text-[var(--amber)] transition-transform collapse-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div id="watchlist-items" class="space-y-3">
+                        <!-- Injected via JS -->
+                    </div>
+                </div>
+
+                <!-- Locked/Guest Watchlist View -->
+                <div id="watchlist-locked" class="mb-8 glass-card rounded-2xl p-6 border-amber-500/20 relative overflow-hidden flex flex-col items-center text-center animate-in fade-in slide-in-from-left-4 duration-500 group hidden">
+                    <div class="absolute inset-0 bg-gradient-to-br from-amber-600/5 to-orange-600/5 pointer-events-none"></div>
+                    <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center text-amber-500 mb-3 group-hover:scale-110 transition-transform duration-500">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>
+                    </div>
+                    <h4 class="text-[11px] font-bold text-white/90 mb-1.5 uppercase tracking-wider">Watchlist Locked</h4>
+                    <p class="text-[9px] text-slate-500 leading-relaxed mb-4">Connect to build your personal monitor and track securities in real-time.</p>
+                    <a href="/login" class="w-full py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all">
+                        Establish Uplink
+                    </a>
+                </div>
+            </div>
+
+            <!-- Market Pulse Panel (Persistent Side Control) -->
+            <span id="movers" class="anchor-target"></span>
+            <div id="market-pulse-panel" class="mb-8 hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <button data-action="toggle-collapse" data-target="movers-collapse-body" class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 cursor-pointer hover:text-[var(--amber)] transition group">
+                        <span id="pulse-indicator" class="w-1 h-3 bg-fuchsia-500 rounded-full"></span>
+                        <span id="pulse-title">Movers</span>
+                        <svg class="w-3 h-3 text-slate-600 group-hover:text-[var(--amber)] transition-transform collapse-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="flex bg-white/5 rounded-lg p-0.5 border border-white/10 overflow-hidden light:bg-slate-100 shrink-0">
+                        <button data-action="switch-pulse" data-pulse="movers" title="Top Movers" class="pulse-tab-btn p-2 rounded-md transition-all active">
+                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                        </button>
+                        <button data-action="switch-pulse" data-pulse="gainers" title="Top Gainers" class="pulse-tab-btn p-2 rounded-md transition-all">
+                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"></path></svg>
+                        </button>
+                        <button data-action="switch-pulse" data-pulse="losers" title="Top Losers" class="pulse-tab-btn p-2 rounded-md transition-all">
+                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        <button data-action="switch-pulse" data-pulse="active" title="Most Active" class="pulse-tab-btn p-2 rounded-md transition-all">
+                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        </button>
+                        <button id="sectors-tab-btn" data-action="switch-pulse" data-pulse="sectors" title="Sector Performance" class="pulse-tab-btn p-2 rounded-md transition-all">
+                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <div id="movers-collapse-body">
+                    <div id="market-pulse-items" class="space-y-3">
+                        <!-- Injected via JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock-selected panels (AI Oracle + Market Indicators) — hidden until a stock is picked -->
+            <div id="left-stock-panels" class="hidden flex flex-col gap-6">
+                <!-- Stock Portfolio — per-symbol mini summary (value, cost,
+                     P&L, return) shown only if the selected stock is in the
+                     user's portfolio. Hidden for guests/basic and when the
+                     stock isn't held. Rendered by showStockPortfolio(). -->
+                <section data-stock-section="indicators" id="stock-portfolio-panel" class="hidden animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        Your Position
+                    </h3>
+                    <div id="stock-portfolio-body"></div>
+                </section>
+
+                <!-- Market Indicators (relocated from right sidebar) -->
+                <section data-stock-section="indicators" id="stock-panel-indicators" role="tabpanel" aria-labelledby="stock-tab-overview" class="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        Market Indicators
+                    </h3>
+                    <span id="stats" class="anchor-target"></span>
+                    <div id="tech-stats" class="grid grid-cols-2 gap-3 rounded-2xl border-blue-500/10">
+                        <!-- Dynamic Injection -->
+                    </div>
+                </section>
+
+                <!-- Indicative Depth — bid/offer/spread snapshot from the
+                     most recent trading session. Public data (same tier as
+                     /v1/history). Rendered by features/orderbook.js when a
+                     stock is selected. Part of the Overview tab on mobile. -->
+                <section data-stock-section="indicators" id="depth-panel" class="hidden animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        Indicative Depth
+                    </h3>
+                    <div id="depth-body" class="glass-card rounded-2xl p-5 border-blue-500/10">
+                        <p class="text-xs text-slate-500/60">Select a stock to view the quote.</p>
+                    </div>
+                </section>
+
+                <!-- AI Oracle Section (relocated from right sidebar) -->
+                <span id="intel" class="anchor-target"></span>
+                <section data-stock-section="oracle" id="stock-panel-oracle" role="tabpanel" aria-labelledby="stock-tab-intel" class="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+                    <button data-action="toggle-collapse" data-target="oracle-collapse-body" class="w-full text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 cursor-pointer hover:text-[var(--amber)] transition group collapsed">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        AI Market Oracle
+                        <svg class="w-3 h-3 ml-auto text-slate-600 group-hover:text-[var(--amber)] transition-transform collapse-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+
+                    <div id="oracle-collapse-body">
+                    <!-- Authenticated View -->
+                    <div id="ai-oracle-authenticated" class="hidden">
+                        <div id="ai-insight-card" class="glass-card rounded-2xl p-5 border-blue-500/10 relative group">
+                            <div class="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+                                <div class="absolute -right-4 -top-4 w-24 h-24 bg-blue-500/5 blur-2xl rounded-full group-hover:bg-blue-500/10 transition-all"></div>
+                            </div>
+
+                            <div class="flex items-center justify-between mb-4">
+                                <span id="ai-signal-badge" class="px-2 py-1 rounded-md text-xs font-black uppercase tracking-widest bg-slate-500/10 text-slate-400 border border-white/5 has-tooltip">Initializing...
+                                    <span class="tooltip">The overall momentum signal derived from RSI, price trend vs SMA50/SMA20, and news sentiment.</span>
+                                </span>
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs font-bold text-slate-500 uppercase has-tooltip">Confidence
+                                        <span class="tooltip">How strongly the indicators agree with each other. Driven by RSI extremity, sentiment conviction, trend alignment, and session volume.</span>
+                                    </span>
+                                    <span id="ai-confidence" class="text-xs font-bold text-slate-300">--%</span>
+                                </div>
+                            </div>
+
+                            <div class="space-y-1 mb-4">
+                                <p class="text-xs text-slate-500 uppercase font-bold tracking-tight has-tooltip">Support Entry (−1 ATR)
+                                    <span class="tooltip">Last session VWAP close minus one Average True Range (14-day). A conservative entry zone that accounts for typical daily price swings.</span>
+                                </p>
+                                <h2 id="ai-suggested-price" class="text-2xl font-bold text-white/95 tracking-tight">¢--.00</h2>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-4 py-4 border-t border-white/5">
+                                <div>
+                                    <p class="text-xs text-slate-500 uppercase font-bold mb-1 has-tooltip">SMA50 Mean
+                                        <span class="tooltip">50-day Simple Moving Average of VWAP closes. Acts as the long-term price gravity — a key support/resistance reference.</span>
+                                    </p>
+                                    <p id="ai-fair-value" class="text-xs font-bold text-slate-300 italic">¢--.00</p>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-slate-500 uppercase font-bold mb-1 has-tooltip">Sentiment
+                                        <span class="tooltip">Recency-weighted score of recent news headlines. Positive = bullish news flow; Negative = bearish. Range: −1 to +1.</span>
+                                    </p>
+                                    <p id="ai-sentiment" class="text-xs font-bold text-slate-300 italic font-display">Neutral</p>
+                                </div>
+                            </div>
+
+                            <div class="pt-4 border-t border-white/5 space-y-2">
+                                 <div class="flex items-center justify-between">
+                                    <span class="text-xs font-black uppercase text-slate-500 tracking-tighter has-tooltip">Market Pulse Score
+                                        <span class="tooltip">Composite news sentiment score (−1 to +1). The bar shows the balance of bullish vs bearish signals from recent headlines.</span>
+                                    </span>
+                                    <span id="sentiment-score" class="text-xs font-bold text-blue-500">0.0</span>
+                                 </div>
+                                 <div class="h-1.5 w-full bg-slate-500/10 rounded-full overflow-hidden flex">
+                                    <div id="sentiment-bar-neg" class="h-full bg-rose-500 transition-all duration-1000" style="width: 50%"></div>
+                                    <div id="sentiment-bar-pos" class="h-full bg-emerald-500 transition-all duration-1000" style="width: 50%"></div>
+                                 </div>
+                            </div>
+
+                            <!-- LLM AI Analysis Text (blockquote style) -->
+                            <div id="ai-analysis-text" class="mt-4 pl-3 border-l-2 border-amber-500/30 hidden">
+                                 <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">AI Consensus</p>
+                                 <div id="ai-analysis-content" class="text-[12px] leading-relaxed text-slate-300/90 font-light"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Insufficient-data View — surfaced when /v1/ai-insight
+                         returns 422 for a symbol without enough history
+                         to run the model. Separate from Locked (which is
+                         tier-gated) and Authenticated (which has real
+                         values); toggled by fetchAIInsight on the 422
+                         branch. -->
+                    <div id="ai-oracle-insufficient" class="hidden glass-card rounded-2xl p-8 border-amber-500/20 relative overflow-hidden flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-500">
+                        <div class="absolute inset-0 bg-gradient-to-br from-amber-600/5 to-orange-600/5 pointer-events-none"></div>
+                        <div class="w-12 h-12 bg-amber-500/10 rounded-xl flex items-center justify-center text-amber-500 mb-4">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                        <h4 class="text-sm font-bold text-white/90 mb-2">Not Enough History</h4>
+                        <p class="text-[11px] text-slate-400 leading-relaxed">There isn't enough market data yet to generate an AI oracle for <span id="ai-oracle-insufficient-symbol" class="text-amber-400 font-bold"></span>. The model needs several weeks of daily closes; check back once more sessions have printed.</p>
+                    </div>
+
+                    <!-- Locked View — served to guests AND to authenticated
+                         basic-tier users (role !== pro/admin). Copy + CTA
+                         are swapped at runtime by features/auth-ticker.js:
+                         guest → "Establish Uplink" (sign-in), basic →
+                         "Upgrade to Pro" (contact/upgrade CTA). -->
+                    <div id="ai-oracle-locked" class="glass-card rounded-2xl p-8 border-blue-500/20 relative overflow-hidden flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-500 group">
+                        <div class="absolute inset-0 bg-gradient-to-br from-blue-600/5 to-indigo-600/5 pointer-events-none"></div>
+                        <div class="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 mb-4 group-hover:scale-110 transition-transform duration-500">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                        </div>
+                        <h4 id="ai-oracle-locked-title" class="text-sm font-bold text-white/90 mb-2">Predictive Intel Locked</h4>
+                        <p id="ai-oracle-locked-body" class="text-[11px] text-slate-400 leading-relaxed mb-6">Gain deep access to real-time predictive analytics and fair value modeling by establishing a terminal uplink.</p>
+                        <a id="ai-oracle-locked-cta" href="/login" class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95">
+                            Establish Uplink
+                        </a>
+                    </div>
+                    </div><!-- /oracle-collapse-body -->
+                </section>
+
+                <!-- Backtest Section — Pro/Admin only. Hidden by default;
+                     features/backtest.js unhides it and populates the body
+                     when a stock is selected. Results are deterministic
+                     (technical indicators only) and render in <50ms. -->
+                <section data-stock-section="backtest" id="backtest-panel" class="hidden mt-6 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+                    <button data-action="toggle-collapse" data-target="backtest-collapse-body" class="w-full text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 cursor-pointer hover:text-[var(--amber)] transition group collapsed">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        Signal Backtest
+                        <svg class="w-3 h-3 ml-auto text-slate-600 group-hover:text-[var(--amber)] transition-transform collapse-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div id="backtest-collapse-body">
+                        <div id="backtest-body" class="glass-card rounded-2xl p-5 border-blue-500/10">
+                            <p class="text-xs text-slate-500/60">Select a stock to run the backtest.</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </aside>
+
+        <!-- Main Analysis Stage -->
+        <main id="home" class="flex-1 flex flex-col p-3 sm:p-4 lg:p-8 min-h-[400px] lg:min-h-0 lg:overflow-hidden relative z-10">
+            
+            <!-- Dynamic Background Glow -->
+            <div class="absolute top-0 right-0 -mr-32 -mt-32 w-96 h-96 bg-blue-600/10 blur-[120px] pointer-events-none rounded-full light:bg-blue-400/5"></div>
+            <div class="absolute bottom-0 left-0 -ml-32 -mb-32 w-96 h-96 bg-indigo-600/5 blur-[120px] pointer-events-none rounded-full light:bg-indigo-400/5"></div>
+
+            <div id="error-result" class="hidden mb-6 p-4 glass-card rounded-2xl text-xs text-amber-400 border-amber-500/20 shadow-xl shadow-amber-500/5 animate-in slide-in-from-top-4"></div>
+
+            <div class="flex-1 glass rounded-3xl dashboard-stage-card flex flex-col relative z-10 overflow-y-auto no-scrollbar">
+                <!-- Price Dashboard -->
+                <span id="quote" class="anchor-target"></span>
+                <div id="price-summary" class="hidden flex-col gap-3 mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-6 sm:mb-8 relative">
+                    <!-- Watchlist Star Injected by JS -->
+                </div>
+
+                <div id="market-overview-dashboard" class="flex-1 w-full flex flex-col gap-6 pb-6">
+                    <!-- Injected via fetchMarketSummary() -->
+                </div>
+
+                <div id="market-sectors-dashboard" class="flex-1 w-full hidden flex-col mb-6 animate-in fade-in duration-500">
+                    <!-- Section header — same amber-pip + small-caps
+                         label pattern as "Today's Briefing" and "Stock
+                         Insights" in panels/index.js, wrapped in
+                         .market-section-header so the mobile styles
+                         (terminal-mobile.css) render it consistently
+                         across breakpoints. Back button sits before
+                         the pip so the tap-target hierarchy reads
+                         back → section → tabs. -->
+                    <div class="mb-4">
+                        <div class="market-section-header flex items-center gap-2 mb-4">
+                            <button data-action="back-from-sectors" class="flex items-center gap-1 text-slate-500 hover:text-amber-400 transition-colors" title="Back to Market Pulse">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                            </button>
+                            <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                            <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em]">Sector Performance</h3>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button data-action="switch-sector-view" data-view="heatmap" class="sector-view-btn active px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white border border-white/5 transition-all">Heatmap</button>
+                            <button data-action="switch-sector-view" data-view="cards" class="sector-view-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white border border-white/5 transition-all">Cards</button>
+                            <button data-action="switch-sector-view" data-view="rotation" class="sector-view-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white border border-white/5 transition-all">Rotation</button>
+                        </div>
+                    </div>
+
+                    <div id="sector-heatmap-container" class="glass-card rounded-2xl p-4 min-h-[420px]">
+                        <div id="sector-heatmap"></div>
+                    </div>
+                    <div id="sector-grid" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- Injected via renderSectorsView() -->
+                    </div>
+                    <div id="sector-rotation-container" class="hidden glass-card rounded-2xl p-4 min-h-[420px]">
+                        <div class="flex items-center gap-2 mb-4">
+                            <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Range</span>
+                            <button data-action="load-sector-rotation" data-range="1W" class="rotation-range-btn px-2 py-1 text-[10px] font-bold rounded text-slate-400 hover:text-white border border-white/5">1W</button>
+                            <button data-action="load-sector-rotation" data-range="1M" class="rotation-range-btn active px-2 py-1 text-[10px] font-bold rounded text-slate-400 hover:text-white border border-white/5">1M</button>
+                            <button data-action="load-sector-rotation" data-range="3M" class="rotation-range-btn px-2 py-1 text-[10px] font-bold rounded text-slate-400 hover:text-white border border-white/5">3M</button>
+                            <button data-action="load-sector-rotation" data-range="6M" class="rotation-range-btn px-2 py-1 text-[10px] font-bold rounded text-slate-400 hover:text-white border border-white/5">6M</button>
+                            <button data-action="load-sector-rotation" data-range="1Y" class="rotation-range-btn px-2 py-1 text-[10px] font-bold rounded text-slate-400 hover:text-white border border-white/5">1Y</button>
+                        </div>
+                        <div id="sector-rotation-chart"></div>
+                    </div>
+                </div>
+
+                <!-- Sector drill-down modal -->
+                <div id="sector-drill-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" data-action="close-sector-drill-backdrop">
+                    <div class="glass rounded-3xl p-6 max-w-2xl w-[90%] max-h-[80vh] overflow-y-auto no-scrollbar border border-white/10">
+                        <div class="flex items-start justify-between mb-4">
+                            <div>
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Sector</p>
+                                <h3 id="sector-drill-title" class="text-2xl font-bold font-display text-white mt-1"></h3>
+                                <p id="sector-drill-stats" class="text-xs text-slate-400 mt-1"></p>
+                            </div>
+                            <button data-action="close-sector-drill" class="text-slate-500 hover:text-white text-2xl leading-none">&times;</button>
+                        </div>
+                        <div id="sector-drill-body"></div>
+                    </div>
+                </div>
+
+                <div id="chart-main" class="flex-1 hidden flex flex-col pb-6 relative w-full h-full">
+                    <div id="chart-controls" role="radiogroup" aria-label="Chart time range" class="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar">
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="1D" class="range-btn">1D</button>
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="5D" class="range-btn">5D</button>
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="1M" class="range-btn">1M</button>
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="6M" class="range-btn">6M</button>
+                        <button role="radio" aria-checked="true"  data-action="update-chart-range" data-range="YTD" class="range-btn active">YTD</button>
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="1Y" class="range-btn">1Y</button>
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="5Y" class="range-btn">5Y</button>
+                        <button role="radio" aria-checked="false" data-action="update-chart-range" data-range="MAX" class="range-btn">MAX</button>
+                        <div class="ml-auto flex items-center gap-1.5 shrink-0 text-[10px] text-slate-500">
+                            <svg class="w-3 h-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            <span id="last-updated-label" class="hidden whitespace-nowrap"><span id="chart-date-start"></span> – <span id="last-updated-date"></span></span>
+                        </div>
+                    </div>
+                    <div id="chart-container" class="w-full relative h-[380px] shrink-0" role="img" aria-label="Stock price chart"></div>
+
+                    <!-- Section tab nav (mobile only) — quick-jump between
+                         the post-chart sections. Renders below the chart
+                         and uses anchor scrolling (no hidden state). -->
+                    <div class="stock-section-nav lg:hidden" role="tablist" aria-orientation="horizontal" aria-label="Stock sections">
+                        <a href="#stats" id="stock-tab-overview" role="tab" aria-selected="true"  aria-controls="stock-panel-indicators stock-panel-about" class="stock-section-tab active" data-section="overview">Overview</a>
+                        <a href="#intel" id="stock-tab-intel"    role="tab" aria-selected="false" aria-controls="stock-panel-oracle"                       class="stock-section-tab" data-section="intel">Intel</a>
+                        <a href="#news"  id="stock-tab-news"     role="tab" aria-selected="false" aria-controls="stock-panel-news"                         class="stock-section-tab" data-section="news">News</a>
+                    </div>
+
+                    <!-- No-data / error empty state (hidden by default).
+                         Populated by fetchHistory when the history response
+                         is empty or errors out. Both paths call the same
+                         showEmptyState() helper in app.js with a tailored
+                         title + message; the icon, back button, and retry
+                         affordance are shared structure. -->
+                    <div id="chart-empty-state" class="hidden flex-1 flex flex-col items-center justify-center text-center py-16 animate-in fade-in duration-500">
+                        <div id="chart-empty-icon" class="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center mb-5 border border-amber-500/20">
+                            <svg class="w-7 h-7 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                        </div>
+                        <h3 id="chart-empty-title" class="text-base font-display font-bold text-white/80 mb-2">No Trading Data</h3>
+                        <p id="chart-empty-message" class="text-xs text-slate-500 max-w-xs leading-relaxed mb-5">No price history available for <span id="chart-empty-symbol" class="text-amber-400 font-bold"></span>. The data may not have been uploaded yet or this symbol has no recent activity.</p>
+                        <div class="flex items-center gap-2">
+                            <button data-action="clear-selected-stock" class="px-3 py-1.5 rounded border border-white/10 hover:border-amber-500/40 hover:bg-amber-500/5 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-amber-400 transition-all">
+                                Back to Dashboard
+                            </button>
+                            <button id="chart-empty-retry" data-action="retry-fetch-history" class="hidden px-3 py-1.5 rounded border border-white/10 hover:border-blue-500/40 hover:bg-blue-500/5 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-blue-400 transition-all">
+                                Retry
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Comparable Stocks Widget -->
+                    <div id="comparables-widget" class="mt-8 hidden animate-in fade-in slide-in-from-bottom-4">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                             <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                             Compare to
+                        </h3>
+                        <div class="relative">
+                            <div id="comparables-container" class="grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
+                                <!-- Injected JS cards -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Side Intelligence Sidebar -->
+        <aside id="news" class="sidebar h-auto lg:h-full flex flex-col glass lg:border-l border-white/5 p-4 lg:p-8 overflow-y-auto no-scrollbar order-last lg:order-none z-20">
+            
+            <div id="sidebar-content" class="hidden flex flex-col gap-10">
+                <!-- About Section (collapsible) -->
+                <section data-stock-section="about" id="stock-panel-about" role="tabpanel" aria-labelledby="stock-tab-overview" class="order-2 lg:order-1 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
+                    <details open>
+                        <summary class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                            <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                            Company Intelligence
+                            <svg class="w-3 h-3 ml-auto opacity-40 transition-transform details-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </summary>
+                        <div id="about-info" class="text-[13px] text-slate-400 leading-relaxed space-y-3 font-light">
+                            <!-- Dynamic Injection -->
+                        </div>
+                    </details>
+                </section>
+
+                <!-- News Section -->
+                <section data-stock-section="news" id="stock-panel-news" role="tabpanel" aria-labelledby="stock-tab-news" class="order-1 lg:order-2 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        <span id="investor-pulse-title">Investor Pulse</span>
+                    </h3>
+                    <div id="news-feed" class="space-y-3">
+                        <!-- Dynamic Injection -->
+                    </div>
+                </section>
+            </div>
+
+            <div id="sidebar-placeholder" class="h-full flex flex-col px-2 space-y-6">
+                <section class="pt-2 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <span class="w-1 h-3 bg-amber-500 rounded-full"></span>
+                        GSE Market News
+                    </h3>
+                    <div id="market-news-feed" class="space-y-3">
+                        <!-- Skeleton loaders -->
+                        <div class="glass-card rounded-2xl p-4 shimmer h-20"></div>
+                        <div class="glass-card rounded-2xl p-4 shimmer h-20"></div>
+                        <div class="glass-card rounded-2xl p-4 shimmer h-20"></div>
+                    </div>
+                </section>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Slide-over Drawer for Data Management (Moved to /admin) -->
+        </div>
+    </div>
+
+    <!-- Merge Account Modal (link OAuth to existing account) -->
+    <div id="merge-account-modal" role="dialog" aria-modal="true" aria-labelledby="merge-account-title" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="glass rounded-2xl p-6 w-[90%] max-w-sm border border-white/10 animate-in fade-in zoom-in-95 duration-300">
+            <div class="flex items-center justify-between mb-4">
+                <h3 id="merge-account-title" class="text-sm font-bold text-white/90 font-display">Link to Existing Account</h3>
+                <button data-action="close-merge-account-modal" aria-label="Close" class="text-slate-500 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed mb-4">
+                Enter the username and password of your existing account to transfer your OAuth login to it.
+            </p>
+            <form data-submit-action="merge-account" class="space-y-3">
+                <label for="merge-username" class="sr-only">Username</label>
+                <input id="merge-username" type="text" placeholder="Username" required autocomplete="username" aria-label="Username"
+                       class="w-full px-3 py-2.5 bg-white/[0.03] border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500/40 transition-all">
+                <label for="merge-password" class="sr-only">Password</label>
+                <input id="merge-password" type="password" placeholder="Password" required autocomplete="current-password" aria-label="Password"
+                       class="w-full px-3 py-2.5 bg-white/[0.03] border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500/40 transition-all">
+                <div id="merge-account-status"></div>
+                <button type="submit" class="w-full py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
+                    Verify & Link Account
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Set Password Modal (for unlinking OAuth) -->
+    <div id="set-password-modal" role="dialog" aria-modal="true" aria-labelledby="set-password-title" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="glass rounded-2xl p-6 w-[90%] max-w-sm border border-white/10 animate-in fade-in zoom-in-95 duration-300">
+            <div class="flex items-center justify-between mb-4">
+                <h3 id="set-password-title" class="text-sm font-bold text-white/90 font-display">Set a Password</h3>
+                <button data-action="close-set-password-modal" aria-label="Close" class="text-slate-500 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed mb-1">
+                To unlink your Google account, you need a password so you can still sign in.
+            </p>
+            <p class="text-[11px] text-slate-500 mb-4">
+                Username: <span id="set-password-username" class="text-amber-400 font-bold"></span>
+            </p>
+            <form data-submit-action="set-password" class="space-y-3">
+                <label for="set-password-input" class="sr-only">New password</label>
+                <input id="set-password-input" type="password" placeholder="New password (min 8 characters)" required minlength="8" aria-label="New password"
+                       class="w-full px-3 py-2.5 bg-white/[0.03] border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500/40 transition-all">
+                <div id="set-password-status"></div>
+                <button type="submit" class="w-full py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
+                    Set Password & Unlink Google
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Alerts drawer — slides in from the right when the bell is tapped.
+         Renders the user's recent alert events and provides a shortcut into
+         the rule-management modal. Backdrop click / Esc closes it via the
+         features/alerts.js keyboard + click handlers. -->
+    <div id="alerts-drawer" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="alerts-drawer-title">
+        <!-- data-action lives on the actual backdrop layer (not the
+             outer wrapper) so taps on the dim area dispatch correctly;
+             otherwise e.target lands on this inner div while the
+             dispatcher would look up to the wrapper and the equality
+             check `e.target === el` fails. -->
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-action="close-alerts-drawer-backdrop"></div>
+        <div class="absolute right-0 top-0 bottom-0 w-full sm:w-[420px] glass border-l border-[var(--hair-strong)] flex flex-col" data-alerts-drawer-panel>
+            <div class="flex items-center justify-between px-5 py-4 border-b border-[var(--hair)]">
+                <h3 id="alerts-drawer-title" class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--amber)]">Alerts</h3>
+                <div class="flex items-center gap-2">
+                    <!-- Rules management lives on the dedicated /settings
+                         page now. The bell drawer stays here for the live
+                         notifications feed only. -->
+                    <a href="/settings#alerts" class="mono text-[10px] uppercase tracking-[0.18em] text-[var(--paper)]/60 hover:text-[var(--amber)] transition px-2 py-1 border border-[var(--hair)]">Rules</a>
+                    <!-- Hidden by default; features/alerts.js reveals it
+                         in renderDrawer() whenever _unread > 0, and hides
+                         it again after markAllAlertsRead() drops the count
+                         to zero. No point offering a "clear" action when
+                         there's nothing to clear. -->
+                    <button id="alerts-clear-btn" data-action="mark-all-alerts-read" class="hidden mono text-[10px] uppercase tracking-[0.18em] text-[var(--paper)]/60 hover:text-[var(--amber)] transition px-2 py-1 border border-[var(--hair)]">Clear</button>
+                    <button data-action="close-alerts-drawer" class="p-2.5 -mr-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" aria-label="Close">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="alerts-drawer-body" class="flex-1 overflow-y-auto no-scrollbar">
+                <!-- Rendered by features/alerts.js -->
+            </div>
+        </div>
+    </div>
+
+    <!-- The in-nav account modal moved to a dedicated /settings page.
+         The nav gear icon is now a plain <a href="/settings"> link; its
+         former open-account-modal dispatcher entry has been removed from
+         app.js alongside this markup. features/account.js still powers
+         the render — its DOM IDs (account-identity, account-email-body,
+         account-password-body) are reused inside settings.html. -->
+
+    <!-- Alert rule management modal — list existing rules + form to add a new
+         one. Invoked from the drawer, from the watchlist star dropdown, or
+         directly from the bell menu. -->
+    <div id="alert-rules-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="alert-rules-title" data-action="close-alert-rules-modal-backdrop">
+        <div class="glass w-[95%] max-w-lg border border-[var(--hair-strong)] p-6 flex flex-col gap-4" data-alert-rules-panel>
+            <div class="flex items-center justify-between">
+                <h3 id="alert-rules-title" class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--amber)]">Watchlist Alerts</h3>
+                <button data-action="close-alert-rules-modal" class="p-2.5 -mr-2 text-[var(--paper)]/60 hover:text-[var(--amber)] transition" aria-label="Close">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <!-- ── Email verification gate ─────────────────────────────
+                 Shown when the authenticated user has no verified email
+                 on file. Offers two paths:
+                   (a) Link an OAuth provider (one-click — the provider
+                       guarantees verification).
+                   (b) Enter an email manually and wait for the confirm
+                       link we send.
+                 Toggled in openAlertRulesModal() based on /v1/me state. -->
+            <div id="alert-verify-panel" class="hidden flex flex-col gap-4 border border-[var(--hair)] p-5">
+                <div>
+                    <p class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--amber)] mb-2">Verify email to continue</p>
+                    <p class="text-[13px] text-[var(--paper)]/80 leading-relaxed">
+                        Alerts notify you by email when a watched stock crosses your threshold. Confirm an email address before creating rules.
+                    </p>
+                </div>
+
+                <!-- OAuth options — auth-ticker.js exposes availableProviders
+                     via window; the alerts module clones the pattern here,
+                     rendering a single "Continue with {Provider}" button
+                     per configured provider. Hidden entirely if no OAuth
+                     providers are wired. -->
+                <div id="alert-verify-oauth" class="flex flex-col gap-2">
+                    <!-- Rendered by features/alerts.js -->
+                </div>
+
+                <!-- OR divider -->
+                <div class="flex items-center gap-3">
+                    <div class="flex-1 h-px bg-[var(--hair)]"></div>
+                    <span class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/40">Or</span>
+                    <div class="flex-1 h-px bg-[var(--hair)]"></div>
+                </div>
+
+                <!-- Manual email form — POST /v1/me/email/request-verify.
+                     Submit is delegated (data-submit-action) so no inline
+                     onsubmit. -->
+                <form data-submit-action="request-verify-email" class="flex flex-col gap-3">
+                    <label class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/50">Use a different email</label>
+                    <input id="verify-form-email" name="email" type="email" placeholder="you@example.com" required autocomplete="email" spellcheck="false"
+                           class="px-3 py-2.5 bg-white/[0.03] border border-[var(--hair)] text-sm text-[var(--paper)] focus:outline-none focus:border-[var(--amber)]">
+                    <div id="verify-form-status" class="mono text-[10px] tracking-widest min-h-[14px]"></div>
+                    <button type="submit" class="py-2 bg-[var(--amber)] text-[var(--ink)] mono text-[10px] uppercase tracking-[0.22em] font-bold hover:opacity-90 transition">Send verification link</button>
+                </form>
+            </div>
+
+            <!-- ── Rule-authoring panel ───────────────────────────────
+                 Shown when the user has a verified email. Identical to
+                 the original modal content, just wrapped so we can
+                 toggle between it and the verify panel above. -->
+            <div id="alert-authoring-panel" class="flex flex-col gap-4">
+                <!-- Rule form — symbol + metric + op + threshold. Submit is
+                     delegated (data-submit-action) so there's no inline onsubmit. -->
+                <form data-submit-action="create-alert-rule" class="flex flex-col gap-3 border border-[var(--hair)] p-4">
+                    <label class="mono text-[9px] uppercase tracking-[0.22em] text-[var(--paper)]/50">Add rule</label>
+                    <div class="grid grid-cols-12 gap-2">
+                        <input id="alert-form-symbol" name="symbol" type="text" placeholder="SYMBOL" required autocomplete="off" spellcheck="false"
+                               class="col-span-4 px-3 py-2 bg-white/[0.03] border border-[var(--hair)] mono text-xs uppercase tracking-widest text-[var(--paper)] focus:outline-none focus:border-[var(--amber)]">
+                        <select id="alert-form-metric" name="metric" required class="col-span-3 px-2 py-2 bg-white/[0.03] border border-[var(--hair)] mono text-[10px] uppercase tracking-widest text-[var(--paper)] focus:outline-none focus:border-[var(--amber)]">
+                            <option value="price">Price</option>
+                            <option value="pct_change">% Change</option>
+                            <option value="rsi">RSI(14)</option>
+                        </select>
+                        <select id="alert-form-op" name="op" required class="col-span-2 px-2 py-2 bg-white/[0.03] border border-[var(--hair)] mono text-xs text-[var(--paper)] focus:outline-none focus:border-[var(--amber)]">
+                            <option value=">">&gt;</option>
+                            <option value="<">&lt;</option>
+                            <option value=">=">&ge;</option>
+                            <option value="<=">&le;</option>
+                        </select>
+                        <input id="alert-form-threshold" name="threshold" type="number" step="any" placeholder="Value" required
+                               class="col-span-3 px-3 py-2 bg-white/[0.03] border border-[var(--hair)] mono text-xs text-[var(--paper)] focus:outline-none focus:border-[var(--amber)]">
+                    </div>
+                    <div id="alert-form-status" class="mono text-[10px] tracking-widest"></div>
+                    <button type="submit" class="py-2 bg-[var(--amber)] text-[var(--ink)] mono text-[10px] uppercase tracking-[0.22em] font-bold hover:opacity-90 transition">Create rule</button>
+                </form>
+
+                <div id="alert-rules-list" class="flex flex-col gap-0 border border-[var(--hair)] max-h-[50vh] overflow-y-auto no-scrollbar">
+                    <!-- Rendered by features/alerts.js -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Libraries (CDN, pinned + SRI). Update both the version in the
+         URL and the integrity hash together; compute via
+         `curl -s URL | openssl dgst -sha384 -binary | openssl base64 -A`. -->
+    <script src="https://unpkg.com/htmx.org@2.0.8/dist/htmx.min.js"
+            integrity="sha384-/TgkGk7p307TH7EXJDuUlgG3Ce1UVolAOFopFekQkkXihi5u/6OCvVKyz1W+idaz"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.54.1/dist/apexcharts.min.js"
+            integrity="sha384-KNaFJ+EK516RuHsoycvreec5pD7BkTKJEkjMrVSQWu9KGTl7En4dhIDv7t1DFJ+g"
+            crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+            integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
+            crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
+            integrity="sha384-Yv5O+t3uE3hunW8uyrbpPW3iw6/5/Y7HitWJBLgqfMoA36NogMmy+8wWZMpn3HWc"
+            crossorigin="anonymous"></script>
+
+    </body>
+</html>

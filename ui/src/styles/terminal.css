@@ -1,0 +1,451 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Terminal page styles.
+ *
+ * Extracted from the inline <style> block in ui/terminal.html per the
+ * ui.md audit (item 5). Semantics are preserved byte-for-byte.
+ *
+ * The !important usage in this file is concentrated where it's genuinely
+ * needed to beat Tailwind utility classes whose source order we don't
+ * control. Custom-class rules (.mobile-tab, .range-btn, .pulse-tab-btn,
+ * .dashboard-stage-card, .gse-mark, .tape-track, etc.) have had their
+ * !important dropped since nothing else competes for those selectors.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+    --ink: #0b0a08;
+    --ink-2: #100e0a;
+    --paper: #f4ecd8;
+    --cream: #e9dfc4;
+    --amber: #ffb12b;
+    --amber-deep: #c97a06;
+    --rust: #b23a17;
+    --moss: #4a6b2a;
+    --ghana-red: #ce1126;
+    --ghana-gold: #fcd116;
+    --ghana-green: #006b3f;
+    --hair: rgba(244,236,216,0.10);
+    --hair-strong: rgba(244,236,216,0.22);
+
+    /* Mobile fixed-header stack — single source of truth. Every
+       top/margin offset in the terminal view is derived from
+       these so resizing any layer cascades automatically. */
+    --nav-h: 56px;
+    --ticker-h: 30px;
+    --chips-h: 44px;
+    --search-h: 64px;
+    --header-default: calc(var(--nav-h) + var(--ticker-h) + var(--chips-h) + var(--search-h));
+    --header-stock:   calc(var(--nav-h) + var(--chips-h));
+    --z-overlay: 60;
+    --z-scanlines: 59;
+    --z-nav: 100;
+    --z-ticker: 95;
+    --z-chips: 90;
+    --z-search: 85;
+    /* Modals + drawer + overlays must sit above the fixed mobile
+       navbar stack (var(--z-nav) = 100) or the top of any modal header
+       — and its close button — renders under the navbar on phones. */
+    --z-modal: 200;
+}
+
+/* Modal / drawer wrappers — applied in addition to Tailwind's z-50.
+   The wrappers all carry one of these IDs and the rule bumps them
+   above --z-nav on every breakpoint (desktop is unaffected because
+   the nav isn't fixed there). */
+#alerts-drawer,
+#alert-rules-modal,
+#account-modal {
+    z-index: var(--z-modal) !important;
+}
+
+html, body {
+    background: var(--ink) !important;
+    color: var(--paper);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-feature-settings: "ss01","cv11","tnum";
+    -webkit-font-smoothing: antialiased;
+}
+.font-display { font-family: 'Inter', serif !important; font-optical-sizing: auto; font-variation-settings: "SOFT" 30; }
+.font-mono, kbd, code, pre { font-family: 'IBM Plex Mono', ui-monospace, monospace !important; font-feature-settings: "tnum","zero"; }
+.serif { font-family: 'Inter', serif; font-optical-sizing: auto; font-variation-settings: "SOFT" 30, "WONK" 1; }
+.mono  { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-feature-settings: "tnum","zero"; }
+
+/* Paper grain overlay */
+body::before {
+    content:""; position: fixed; inset: 0; pointer-events: none; z-index: var(--z-overlay);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 .92  0 0 0 0 .78  0 0 0 .05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode: overlay; opacity: .5;
+}
+body::after {
+    content:""; position: fixed; inset: 0; pointer-events: none; z-index: var(--z-scanlines);
+    background-image: repeating-linear-gradient(to bottom, transparent 0 3px, rgba(255,255,255,.012) 3px 4px);
+}
+
+/* Override "glass" surfaces — needs !important to beat Tailwind util cascade */
+.glass {
+    background: rgba(11,10,8,0.78) !important;
+    backdrop-filter: blur(8px);
+    border-color: var(--hair-strong) !important;
+}
+.glass-card {
+    background: rgba(16,14,10,0.7) !important;
+    border: 1px solid var(--hair-strong) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+.rounded-2xl, .rounded-3xl, .rounded-xl, .rounded-\[2rem\] { border-radius: 2px !important; }
+.rounded-full { border-radius: 9999px !important; }
+
+/* Top nav restyle */
+nav.h-16 {
+    background: rgba(11,10,8,0.92) !important;
+    border-bottom: 1px solid var(--hair-strong) !important;
+    box-shadow: 0 1px 0 var(--hair) inset;
+}
+
+/* Search field */
+#symbol-search {
+    background: rgba(244,236,216,0.04);
+    border: 1px solid var(--hair-strong);
+    color: var(--paper);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-radius: 2px;
+}
+#symbol-search:focus { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+#symbol-search::placeholder { color: rgba(244,236,216,0.4); }
+#symbols-dropdown {
+    background: var(--ink);
+    border: 1px solid var(--hair-strong);
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+}
+kbd { background: var(--ink-2) !important; border-color: var(--hair) !important; color: var(--paper) !important; }
+
+/* Buttons & accent surfaces → amber (Tailwind util overrides — !important required) */
+.bg-blue-500, .bg-blue-600, .hover\:bg-blue-500:hover, .hover\:bg-blue-600:hover { background-color: var(--amber) !important; color: var(--ink) !important; }
+.text-blue-400, .text-blue-500, .text-indigo-500 { color: var(--amber) !important; }
+.border-blue-500\/20, .border-blue-500\/10, .border-blue-500\/40, .border-indigo-500\/10 { border-color: rgba(255,177,43,0.25) !important; }
+.bg-blue-500\/10, .bg-blue-500\/20, .bg-blue-600\/5, .bg-blue-600\/10, .bg-indigo-600\/5 { background-color: rgba(255,177,43,0.08) !important; }
+.from-blue-500, .to-indigo-600, .from-indigo-500\/10, .to-blue-500\/5, .from-blue-600\/5, .to-indigo-600\/5 { --tw-gradient-from: rgba(255,177,43,0.1) !important; --tw-gradient-to: rgba(255,177,43,0.02) !important; }
+.bg-gradient-to-br.from-blue-500 { background: var(--amber) !important; }
+.shadow-blue-500\/20, .shadow-blue-600\/20, .shadow-blue-500\/5 { --tw-shadow-color: rgba(255,177,43,0.15) !important; box-shadow: 0 8px 30px var(--tw-shadow-color); }
+
+/* Slate text → cream/paper (Tailwind util overrides) */
+.text-slate-300, .text-slate-400 { color: rgba(244,236,216,0.78) !important; }
+.text-slate-500, .text-slate-600 { color: rgba(244,236,216,0.5) !important; }
+.text-white, .text-white\/90, .text-white\/95 { color: var(--paper) !important; }
+.bg-white\/5, .hover\:bg-white\/5:hover, .bg-white\/\[0\.03\] { background-color: rgba(244,236,216,0.04) !important; }
+.bg-white\/10, .hover\:bg-white\/10:hover { background-color: rgba(244,236,216,0.08) !important; }
+.border-white\/5, .border-white\/10 { border-color: var(--hair) !important; }
+
+/* Range buttons (chart timeframes) — custom class, no Tailwind collision */
+.range-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    background: transparent;
+    color: rgba(244,236,216,0.55);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    transition: all .2s ease;
+}
+.range-btn:hover { color: var(--amber); border-color: var(--amber); }
+.range-btn.active { background: var(--amber); color: var(--ink); border-color: var(--amber); font-weight: 700; }
+
+/* Collapsible section chevron — rotates 180° when toggled */
+.collapse-chevron { transition: transform 0.2s ease; }
+.collapse-chevron.rotate-180 { transform: rotate(180deg); }
+
+/* Pulse tabs */
+.pulse-tab-btn { color: rgba(244,236,216,0.5); }
+.pulse-tab-btn:hover { color: var(--amber); }
+.pulse-tab-btn.active { background: var(--amber); color: var(--ink); }
+
+/* Sidebar + section headers — unified with the "Stock Insights" /
+   "Today's Briefing" treatment so every section label in the terminal
+   reads the same. Previously this rule forced amber + 10px + 0.24em
+   on every aside/section h3/summary, which diverged from the inline
+   Tailwind classes (`text-xs text-slate-500 tracking-[0.2em]`) the
+   center labels use. Now we only force the font-family (JetBrains
+   Mono) and let the inline color / size / tracking win. The pip
+   dingbat stays amber for a consistent accent across rails. */
+aside h3.text-xs.font-bold,
+section h3.text-xs.font-bold,
+aside summary.text-xs.font-bold,
+section summary.text-xs.font-bold {
+    font-family: 'IBM Plex Mono', monospace !important;
+}
+aside h3 .w-1.h-3, section h3 .w-1.h-3,
+aside summary .w-1.h-3, section summary .w-1.h-3 { background: var(--amber) !important; }
+
+/* Section-title typography — unified across the terminal so the left
+   rail (My Watchlist, Movers), the right rail (GSE Market News), and
+   the center "Stock Insights" / "Today's Briefing" labels all render
+   in the same JetBrains Mono + 0.2em tracking treatment. Previously
+   only `.market-section-header` picked this up on desktop; the sidebar
+   headings fell through to the default Outfit sans, which is what the
+   "titles look different" bug boiled down to. Mobile already matched
+   (see terminal-mobile.css) — this brings desktop into line. */
+.market-section-header h3,
+.market-section-header h4,
+#watchlist-panel h3,
+#market-pulse-panel h3,
+#sidebar-placeholder h3 {
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.2em;
+}
+.market-briefing__card {
+    background: rgba(16,14,10,0.55) !important;
+    border: 1px solid var(--hair-strong) !important;
+    border-left: 2px solid var(--amber) !important;
+    padding: 18px !important;
+}
+.market-briefing__summary {
+    font-family: 'Inter', serif !important;
+    font-weight: 400 !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    letter-spacing: -0.005em;
+    color: rgba(244,236,216,0.85) !important;
+}
+
+/* Headlines */
+h1.font-display, h2.font-display { font-family: 'Inter', serif !important; letter-spacing: -0.02em; }
+
+/* Collapsible sections — rotate chevron when open */
+details[open] > summary .details-open\:rotate-180 { transform: rotate(180deg); }
+details:not([open]) > summary .details-open\:rotate-180 { transform: rotate(0); }
+
+/* Active watchlist/movers item — highlighted when it matches the
+   currently loaded stock. Set via data-stock-row-active in JS. */
+#watchlist-items [data-stock-row-active="true"],
+#market-pulse-items [data-stock-row-active="true"] {
+    border-left: 2px solid var(--amber);
+    background: rgba(255,177,43,0.04);
+}
+
+/* Alerts bell — a small amber pip appears when data-count > 0. Driven by
+   features/alerts.js via setUnread(). No numeric badge (would crowd the
+   nav on narrow viewports); the pip is presence-only, the actual count
+   lives in the drawer header. */
+#alerts-bell-btn::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    background: var(--amber);
+    border-radius: 9999px;
+    opacity: 0;
+    transform: scale(0);
+    transition: opacity .2s ease, transform .2s ease;
+    box-shadow: 0 0 0 2px var(--ink);
+}
+#alerts-bell-btn:not([data-count="0"])::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Account button — same amber pip when there's something the user
+   should act on (e.g. unverified email). Driven by data-needs-attention
+   set in features/account.js / auth-ticker.js. */
+#account-btn::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    background: var(--amber);
+    border-radius: 9999px;
+    opacity: 0;
+    transform: scale(0);
+    transition: opacity .2s ease, transform .2s ease;
+    box-shadow: 0 0 0 2px var(--ink);
+}
+#account-btn[data-needs-attention="true"]::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Tooltips */
+.tooltip {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--amber);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+}
+
+/* Shimmer skeleton */
+.shimmer {
+    background: linear-gradient(90deg, rgba(244,236,216,0.04) 0%, rgba(244,236,216,0.10) 50%, rgba(244,236,216,0.04) 100%) !important;
+    background-size: 200% 100% !important;
+}
+
+/* Sentiment bars (Tailwind color util overrides) */
+.bg-rose-500 { background-color: var(--rust) !important; }
+.bg-emerald-500 { background-color: var(--moss) !important; }
+.bg-amber-500 { background-color: var(--amber) !important; }
+.text-amber-400, .text-amber-500 { color: var(--amber) !important; }
+.text-rose-400, .text-rose-500 { color: var(--rust) !important; }
+.text-emerald-400, .text-emerald-500 { color: var(--moss) !important; }
+.text-fuchsia-500 { color: var(--ghana-red) !important; }
+
+/* Nav status */
+#nav-status-text { font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.22em; }
+
+/* Chart container background */
+#chart-container { background: rgba(16,14,10,0.4); border: 1px solid var(--hair); }
+/* Remove the browser focus outline on the chart SVG but keep the
+   zoom/selection rectangles functional for drag-to-zoom on desktop. */
+#chart-container svg,
+#chart-container foreignObject,
+#chart-container .apexcharts-canvas { outline: none; }
+
+/* Selection */
+::selection { background: var(--amber); color: var(--ink); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(244,236,216,0.12); }
+::-webkit-scrollbar-thumb:hover { background: var(--amber); }
+
+/* Logo mark */
+.gse-mark {
+    width: 36px; height: 36px;
+    border: 1px solid var(--amber);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+}
+.gse-mark > div { width: 20px; height: 20px; background: var(--amber); }
+.gse-mark::after { content:""; position:absolute; top:-2px; right:-2px; width:6px; height:6px; background: var(--ghana-red); }
+
+/* Ticker tape — translate3d + will-change force GPU compositing so
+   the marquee stays smooth even with backdrop-blur on the parent. */
+@keyframes tape {
+    from { transform: translate3d(0, 0, 0); }
+    to   { transform: translate3d(-50%, 0, 0); }
+}
+.tape-track {
+    animation: tape 60s linear infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+}
+.tape-track:hover { animation-play-state: paused; }
+@keyframes pip { 0%{box-shadow:0 0 0 0 rgba(255,177,43,.55)} 70%{box-shadow:0 0 0 8px rgba(255,177,43,0)} 100%{box-shadow:0 0 0 0 rgba(255,177,43,0)} }
+.pip { animation: pip 1.8s ease-out infinite; }
+
+/* Dashboard stage frame */
+.dashboard-stage-card {
+    background: rgba(16,14,10,0.55);
+    border: 1px solid var(--hair-strong);
+    border-radius: 2px;
+    padding: 1.25rem;
+    position: relative;
+}
+/* Chrome label removed — was visual noise with no functional value. */
+
+/* Light mode tweaks */
+.light body, body.light { background: var(--paper) !important; color: var(--ink) !important; }
+
+/* ──────────────────────────────────────────────────────────
+   Mobile-first overrides (Google Finance inspired)
+   ────────────────────────────────────────────────────────── */
+
+/* Mobile section tab chips — anchor links above <main> */
+.mobile-section-nav {
+    position: sticky;
+    top: 56px;
+    z-index: 40;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: rgba(11,10,8,0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--hair-strong);
+    padding: 8px 0 8px 16px;
+}
+.mobile-section-nav::-webkit-scrollbar { display: none; }
+/* Trailing spacer — browsers collapse padding-right on overflow-x
+   containers, so use a zero-width pseudo-element with explicit width
+   to guarantee symmetric left/right breathing room. The spacer width
+   (10px) plus the flex gap (6px) equals the 16px left padding. */
+.mobile-section-nav::after {
+    content: '';
+    flex: 0 0 10px;
+}
+.mobile-tab {
+    flex: 0 0 auto;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    color: rgba(244,236,216,0.6);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    text-decoration: none;
+    transition: all .2s ease;
+    white-space: nowrap;
+}
+.mobile-tab:hover,
+.mobile-tab:focus {
+    color: var(--amber);
+    border-color: var(--amber);
+}
+/* Chip highlighting is driven by body[data-tab="..."] set from JS
+   (see _syncTabState in app.js). No :has() — works on Safari < 16. */
+.mobile-tab[data-tab-active="true"] {
+    border-color: var(--amber);
+    font-weight: 700;
+}
+.mobile-tab.inactive-chip {
+    background: transparent;
+    color: rgba(244,236,216,0.6);
+    border-color: var(--hair);
+    font-weight: 600;
+}
+
+/* Smooth in-page anchor scrolling, with offset for sticky nav */
+html { scroll-behavior: smooth; }
+.anchor-target,
+#home, #news, #news-feed, #chart-main, #sidebar-content {
+    scroll-margin-top: 210px;
+}
+.anchor-target { display: block; height: 0; }
+
+/* Mobile (<1024px) styles live in ./terminal-mobile.css, imported in app.js. */
+
+@media (min-width: 1024px) {
+    /* Desktop: section nav is hidden, anchors not needed */
+    .mobile-section-nav { display: none !important; }
+
+    /* Desktop: lift the search bar back into the masthead slot */
+    .terminal-search-wrap {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        height: 64px;
+        width: 100%;
+        max-width: 36rem;
+        display: flex;
+        align-items: center;
+        z-index: 101;
+        pointer-events: none;
+    }
+    .terminal-search-wrap > .terminal-search { pointer-events: auto; width: 100%; }
+
+    /* Mobile section nav is mobile-only (already `lg:hidden` in markup,
+       but belt-and-braces to beat any cascade regression). */
+    .stock-section-nav { display: none !important; }
+}
