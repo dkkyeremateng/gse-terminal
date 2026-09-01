@@ -476,6 +476,17 @@ func (s *Server) HandleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same lockout guard the role handler already applies to self-demotion.
+	// Deleting your own account is strictly worse: a lone admin who does it
+	// leaves the instance with no admin and no in-app way back, since the
+	// bootstrap admin is only created when the users table is empty and it
+	// would not be.
+	if callerID, ok := r.Context().Value(auth.UserIDKey).(int); ok && callerID == id {
+		respondError(w, http.StatusBadRequest,
+			"You cannot delete your own account. Promote another user to admin first.")
+		return
+	}
+
 	err = s.pgRepo.DeleteUser(r.Context(), id)
 	if err != nil {
 		if wantsJSON(r) {

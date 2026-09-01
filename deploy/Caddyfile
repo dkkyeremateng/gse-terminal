@@ -12,6 +12,20 @@
 {$APP_DOMAIN} {
 	encode zstd gzip
 
+	# HSTS. The app sets the other security headers itself, but this one
+	# belongs at the TLS terminator: it only means anything on a response
+	# that already arrived over HTTPS. Without it a first visit typed as
+	# http:// is interceptable before the redirect lands, which for a site
+	# holding portfolio positions behind a session cookie is worth closing.
+	#
+	# One year, covering subdomains of this host. Deliberately no `preload`:
+	# submitting to the browser preload list is effectively irreversible and
+	# commits every subdomain to HTTPS forever, so it is an explicit decision
+	# to make, not a default to inherit from a config change.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
 	# /metrics is gated by METRICS_TOKEN in the app, but there's no reason to
 	# accept the request from the internet at all. Scrape it over the private
 	# network or an SSH tunnel instead.

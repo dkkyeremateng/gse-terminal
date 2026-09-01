@@ -52,6 +52,12 @@ var (
 // recommendation for interactive auth; 10 was the pre-bump default.
 const bcryptCost = 12
 
+// BcryptCost exposes the work factor so the login handler can build a decoy
+// hash at the same cost. A decoy verified at a different cost would take a
+// visibly different amount of time and reintroduce the timing signal it
+// exists to remove.
+const BcryptCost = bcryptCost
+
 type PostgresRepo struct {
 	pool *pgxpool.Pool
 }
