@@ -3,6 +3,7 @@ package ingestor
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,20 +40,42 @@ func ValidSymbol(sym string) bool {
 	return len(sym) <= SymbolMaxLen && symbolRe.MatchString(sym)
 }
 
-type Ingestor struct {
-	qdbRepo *repository.QuestDBRepo
+// TickSink is the narrow write surface ingest needs. *repository.QuestDBRepo
+// satisfies it. Declared as an interface so the ingest loop's error handling
+// -- which rows are skipped, when the buffer is flushed -- can be tested
+// without a live QuestDB, since flush-on-abort is precisely the behaviour
+// that has no observable effect until something goes wrong.
+type TickSink interface {
+	InsertTick(ctx context.Context, t repository.Tick) error
+	Flush(ctx context.Context) error
 }
 
-func NewIngestor(qdbRepo *repository.QuestDBRepo) *Ingestor {
+type Ingestor struct {
+	qdbRepo TickSink
+}
+
+func NewIngestor(qdbRepo TickSink) *Ingestor {
 	return &Ingestor{qdbRepo: qdbRepo}
 }
 
 // Result summaries an ingestion run so the caller can surface skipped rows
 // to the operator instead of silently dropping them.
+//
+// Inserted counts rows that parsed and were accepted by the ILP sender.
+// Rows only become durable at Flush, which is why ingest now flushes on
+// every exit path -- previously an abort returned a non-zero Inserted for
+// rows still sitting in an unflushed buffer.
 type Result struct {
 	Inserted int
 	Skipped  int
 }
+
+// maxConsecutiveReadErrors bounds how many malformed rows in a row we will
+// tolerate before giving up on the file. A handful of bad lines is a
+// quoting glitch worth skipping past; hundreds back-to-back means we are
+// not reading the format we think we are, and continuing would fill the
+// log without producing data.
+const maxConsecutiveReadErrors = 50
 
 func (i *Ingestor) Ingest(ctx context.Context, reader io.Reader) (Result, error) {
 	return i.ingest(ctx, reader, nil)
@@ -88,6 +111,25 @@ func (i *Ingestor) ingest(ctx context.Context, reader io.Reader, onTick func(rep
 
 	res := Result{}
 	row := 0
+	consecutiveReadErrs := 0
+
+	// flush sends whatever the ILP sender is holding. It has to run on
+	// every exit path, not just the happy one: InsertTick only buffers, so
+	// an early return left an unknown tail of already-counted rows
+	// unflushed and reported them as Inserted anyway.
+	flush := func(cause error) (Result, error) {
+		ferr := i.qdbRepo.Flush(ctx)
+		switch {
+		case cause != nil && ferr != nil:
+			return res, fmt.Errorf("%w (flush also failed: %v)", cause, ferr)
+		case cause != nil:
+			return res, cause
+		case ferr != nil:
+			return res, fmt.Errorf("error flushing to QuestDB: %v", ferr)
+		}
+		return res, nil
+	}
+
 	for {
 		record, err := csvReader.Read()
 		if err == io.EOF {
@@ -95,8 +137,30 @@ func (i *Ingestor) ingest(ctx context.Context, reader io.Reader, onTick func(rep
 		}
 		row++
 		if err != nil {
-			return res, fmt.Errorf("error reading csv at row %d: %v", row, err)
+			// A malformed line is a property of that line, not of the
+			// file. Skipping it matches how a row that fails parseRecord
+			// is handled, and keeps one bad line in a 10,000-row backfill
+			// from discarding the other 9,999.
+			//
+			// encoding/csv returns the record alongside ErrFieldCount and
+			// resumes from the next line, so continuing is safe; parseRecord
+			// bounds-checks every column access for the short-row case.
+			// Anything that is not a parse error (an I/O failure on the
+			// underlying reader) is not per-line and does abort.
+			var parseErr *csv.ParseError
+			if !errors.As(err, &parseErr) {
+				return flush(fmt.Errorf("error reading csv at row %d: %v", row, err))
+			}
+			consecutiveReadErrs++
+			res.Skipped++
+			slog.Warn("Skipping unreadable CSV row", "row", row, "error", err)
+			if consecutiveReadErrs >= maxConsecutiveReadErrors {
+				return flush(fmt.Errorf("giving up at row %d after %d consecutive unreadable rows; the file is probably not the expected format",
+					row, consecutiveReadErrs))
+			}
+			continue
 		}
+		consecutiveReadErrs = 0
 
 		tick, err := parseRecord(record, headerMap)
 		if err != nil {
@@ -106,7 +170,7 @@ func (i *Ingestor) ingest(ctx context.Context, reader io.Reader, onTick func(rep
 		}
 
 		if err := i.qdbRepo.InsertTick(ctx, tick); err != nil {
-			return res, fmt.Errorf("insert at row %d: %v", row, err)
+			return flush(fmt.Errorf("insert at row %d: %v", row, err))
 		}
 		res.Inserted++
 		if onTick != nil {
@@ -114,11 +178,18 @@ func (i *Ingestor) ingest(ctx context.Context, reader io.Reader, onTick func(rep
 		}
 	}
 
-	if err := i.qdbRepo.Flush(ctx); err != nil {
-		return res, fmt.Errorf("error flushing to QuestDB: %v", err)
-	}
+	return flush(nil)
+}
 
-	return res, nil
+// field reads a column by index, returning "" when the row is shorter than
+// the header. Rows with a field-count mismatch are now skipped rather than
+// aborting the file, so every access here has to tolerate a short record --
+// an unchecked record[idx] would panic on the first one.
+func field(record []string, idx int) string {
+	if idx < 0 || idx >= len(record) {
+		return ""
+	}
+	return record[idx]
 }
 
 func parseRecord(record []string, headerMap map[string]int) (repository.Tick, error) {
@@ -129,7 +200,7 @@ func parseRecord(record []string, headerMap map[string]int) (repository.Tick, er
 	t.Timestamp = time.Now().UTC()
 
 	if idx, ok := getIdxPrefix(headerMap, "dailydate"); ok {
-		t.TradingDate, err = time.Parse("02/01/2006", strings.TrimSpace(record[idx]))
+		t.TradingDate, err = time.Parse("02/01/2006", strings.TrimSpace(field(record, idx)))
 		if err != nil {
 			return t, fmt.Errorf("invalid date: %v", err)
 		}
@@ -144,7 +215,7 @@ func parseRecord(record []string, headerMap map[string]int) (repository.Tick, er
 		// symbol's history in two. Preference lines and rights issues
 		// ("SCB PREF", "GGBL RE") are genuinely distinct instruments and
 		// are deliberately left alone.
-		t.Symbol = strings.TrimSpace(strings.ReplaceAll(record[idx], "*", ""))
+		t.Symbol = strings.TrimSpace(strings.ReplaceAll(field(record, idx), "*", ""))
 		if t.Symbol == "" {
 			return t, fmt.Errorf("empty symbol") // Required
 		}
@@ -163,38 +234,38 @@ func parseRecord(record []string, headerMap map[string]int) (repository.Tick, er
 	}
 
 	if idx, ok := getIdxPrefix(headerMap, "yearhigh"); ok {
-		t.YearHigh = parseFloatClean(record[idx])
+		t.YearHigh = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "yearlow"); ok {
-		t.YearLow = parseFloatClean(record[idx])
+		t.YearLow = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "previousclosingprice"); ok {
-		t.PrevCloseVWAP = parseFloatClean(record[idx])
+		t.PrevCloseVWAP = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "openingprice", "openprice"); ok {
-		t.OpenPrice = parseFloatClean(record[idx])
+		t.OpenPrice = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "lasttransactionprice", "lastprice", "closeprice"); ok {
-		t.LastPrice = parseFloatClean(record[idx])
+		t.LastPrice = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "closingpricevwap"); ok {
-		t.ClosePriceVWAP = parseFloatClean(record[idx])
+		t.ClosePriceVWAP = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "pricechange"); ok {
-		t.PriceChange = parseFloatClean(record[idx])
+		t.PriceChange = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "closingbidprice"); ok {
-		t.BidPrice = parseFloatClean(record[idx])
+		t.BidPrice = parseFloatClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "closingofferprice"); ok {
-		t.OfferPrice = parseFloatClean(record[idx])
+		t.OfferPrice = parseFloatClean(field(record, idx))
 	}
 
 	if idx, ok := getIdxPrefix(headerMap, "totalsharestraded", "volume"); ok {
-		t.TotalVolume = parseIntClean(record[idx])
+		t.TotalVolume = parseIntClean(field(record, idx))
 	}
 	if idx, ok := getIdxPrefix(headerMap, "totalvaluetraded"); ok {
-		t.TotalValue = parseFloatClean(record[idx])
+		t.TotalValue = parseFloatClean(field(record, idx))
 	}
 
 	return t, nil

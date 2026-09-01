@@ -251,3 +251,36 @@ func TestParseRecord_RejectsMalformedSymbol(t *testing.T) {
 		}
 	}
 }
+
+// A short row used to abort the whole file at csvReader.Read, and an
+// unchecked record[idx] would panic once we started skipping past it.
+func TestParseRecord_ToleratesShortRows(t *testing.T) {
+	hm := map[string]int{
+		"dailydate": 0, "sharecode": 1, "yearhigh": 2, "totalsharestraded": 11,
+	}
+	// Row stops after the symbol; every later column is missing.
+	tick, err := parseRecord([]string{"01/09/2026", "MTNGH"}, hm)
+	if err != nil {
+		t.Fatalf("short row rejected: %v", err)
+	}
+	if tick.Symbol != "MTNGH" {
+		t.Errorf("symbol = %q, want MTNGH", tick.Symbol)
+	}
+	if tick.YearHigh != 0 || tick.TotalVolume != 0 {
+		t.Errorf("missing columns should read as zero, got high=%v vol=%v", tick.YearHigh, tick.TotalVolume)
+	}
+}
+
+func TestField_BoundsChecked(t *testing.T) {
+	rec := []string{"a", "b"}
+	for _, tc := range []struct {
+		idx  int
+		want string
+	}{
+		{0, "a"}, {1, "b"}, {2, ""}, {99, ""}, {-1, ""},
+	} {
+		if got := field(rec, tc.idx); got != tc.want {
+			t.Errorf("field(%v, %d) = %q, want %q", rec, tc.idx, got, tc.want)
+		}
+	}
+}
