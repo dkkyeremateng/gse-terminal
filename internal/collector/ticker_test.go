@@ -1,7 +1,10 @@
 package collector
 
 import (
+	"bytes"
+	"log/slog"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,11 +82,12 @@ func TestGetLastTradingDate(t *testing.T) {
 		from string
 		want string
 	}{
-		{"weekday returns itself", "2026-08-21", "2026-08-21"},       // Friday
-		{"saturday walks back", "2026-08-22", "2026-08-21"},          // Sat -> Fri
-		{"sunday walks back", "2026-08-23", "2026-08-21"},            // Sun -> Fri
-		{"holiday walks back", "2026-08-03", "2026-07-31"},           // Founders' Day (Mon) -> Fri
-		{"christmas walks past weekend", "2026-12-26", "2026-12-24"}, // Boxing Day (Sat) -> Thu (25th is a holiday)
+		{"weekday returns itself", "2026-08-21", "2026-08-21"},                    // Friday
+		{"saturday walks back", "2026-08-22", "2026-08-21"},                       // Sat -> Fri
+		{"sunday walks back", "2026-08-23", "2026-08-21"},                         // Sun -> Fri
+		{"closure walks back", "2026-04-06", "2026-04-02"},                        // Easter Mon -> Thu (3rd is Good Friday)
+		{"traded commemorative day is not a closure", "2026-07-01", "2026-07-01"}, // Republic Day: market open
+		{"christmas walks past weekend", "2026-12-26", "2026-12-24"},              // Boxing Day (Sat) -> Thu (25th is a holiday)
 	}
 
 	for _, tc := range cases {
@@ -164,5 +168,89 @@ func TestTradingDaysBetweenIgnoresClockTime(t *testing.T) {
 	to := time.Date(2026, 9, 2, 0, 1, 0, 0, time.UTC)
 	if got := tradingDaysBetween(from, to); got != 1 {
 		t.Errorf("got %d, want 1 — the time of day must not affect the count", got)
+	}
+}
+
+// The closure calendar used to be a Ghana public-holiday list, and the two
+// are not the same thing. Checked against the sessions actually held in
+// 2026, it listed four days the market traded and omitted five it did not.
+// These cases pin the corrections so the list cannot drift back.
+func TestMarketClosures_MatchesObservedSessions(t *testing.T) {
+	// Days the previous table called holidays and the GSE traded anyway.
+	// Listing them made the scheduler skip a real session.
+	traded := map[string]string{
+		"2026-01-07": "Constitution Day",
+		"2026-05-25": "Africa Day",
+		"2026-07-01": "Republic Day",
+		"2026-08-03": "the day before Founders' Day",
+	}
+	for iso, why := range traded {
+		d, _ := time.Parse("2006-01-02", iso)
+		if name, closed := isMarketClosure(d); closed {
+			t.Errorf("%s (%s): listed as closure %q, but the market traded", iso, why, name)
+		}
+	}
+
+	// Days the GSE held no session and the previous table did not list.
+	// Omitting them makes the freshness watchdog count a closure as
+	// missing data.
+	closed := map[string]string{
+		"2026-01-09": "no session published",
+		"2026-03-20": "Eid al-Fitr",
+		"2026-03-23": "Eid al-Fitr observed",
+		"2026-05-27": "Eid al-Adha",
+		"2026-07-03": "no session published",
+	}
+	for iso, why := range closed {
+		d, _ := time.Parse("2006-01-02", iso)
+		if _, isClosed := isMarketClosure(d); !isClosed {
+			t.Errorf("%s (%s): market held no session, but it is not listed as a closure", iso, why)
+		}
+	}
+}
+
+// A closure the calendar does not know about must inflate staleness (safe:
+// a spurious alert someone investigates) rather than be silently forgiven.
+func TestTradingDaysBetween_SkipsKnownClosures(t *testing.T) {
+	parse := func(s string) time.Time {
+		d, _ := time.Parse("2006-01-02", s)
+		return d
+	}
+	// Thu 2026-04-02 to Tue 2026-04-07 spans Good Friday, a weekend, and
+	// Easter Monday. Only the 7th is a trading day.
+	if got := tradingDaysBetween(parse("2026-04-02"), parse("2026-04-07")); got != 1 {
+		t.Errorf("tradingDaysBetween over Easter = %d, want 1", got)
+	}
+	// Republic Day is no longer forgiven, because the market is open.
+	// Wed 2026-06-30 to Thu 2026-07-02 covers the 1st and the 2nd.
+	if got := tradingDaysBetween(parse("2026-06-30"), parse("2026-07-02")); got != 2 {
+		t.Errorf("tradingDaysBetween across Republic Day = %d, want 2", got)
+	}
+}
+
+// The calendar is hard-coded and therefore expires. It has to say so while
+// there is still time to extend it — the previous one ran out silently.
+func TestCheckClosureCalendar_WarnsBeforeExpiry(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Comfortably inside coverage: silent.
+	checkClosureCalendar(closureCalendarThrough.AddDate(0, 0, -200), logger)
+	if buf.Len() != 0 {
+		t.Errorf("warned while well inside coverage: %s", buf.String())
+	}
+
+	// Inside the warning window.
+	buf.Reset()
+	checkClosureCalendar(closureCalendarThrough.AddDate(0, 0, -30), logger)
+	if !strings.Contains(buf.String(), "expires soon") {
+		t.Errorf("no warning inside the notice window: %s", buf.String())
+	}
+
+	// Past the horizon.
+	buf.Reset()
+	checkClosureCalendar(closureCalendarThrough.AddDate(0, 0, 1), logger)
+	if !strings.Contains(buf.String(), "has expired") {
+		t.Errorf("no error past the horizon: %s", buf.String())
 	}
 }
