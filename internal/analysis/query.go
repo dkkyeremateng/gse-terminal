@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +26,37 @@ type QueryResult struct {
 var dangerousPatterns = regexp.MustCompile(
 	`(?i)\b(UPDATE|DELETE|INSERT|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|EXEC)\b|;`,
 )
+
+// commentPattern rejects SQL comments. The prompt already forbids them, but
+// a comment is the standard way to make a keyword check read one thing and
+// the engine read another, so it is worth enforcing rather than requesting.
+var commentPattern = regexp.MustCompile(`--|/\*|\*/`)
+
+// tableRefPattern captures the identifier after FROM or JOIN. A subquery
+// (`FROM (SELECT ...`) does not match, which is fine — its own inner FROM
+// does.
+var tableRefPattern = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)`)
+
+// cteNamePattern captures names bound by WITH x AS ( / , y AS ( so a CTE
+// reference is not mistaken for an unauthorised table.
+var cteNamePattern = regexp.MustCompile(`(?i)(?:\bWITH\s+|,\s*)([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(`)
+
+// trailingLimitPattern matches the LIMIT clause QuestDB accepts in both
+// forms: `LIMIT n` and the ranged `LIMIT lo, hi`.
+var trailingLimitPattern = regexp.MustCompile(`(?i)\bLIMIT\s+(\d+)\s*(?:,\s*(\d+)\s*)?$`)
+
+// allowedTable is the only table the generated SQL may read. The prompt
+// says so, but saying so is not enforcement — QuestDB exposes system
+// tables, and the user's question is appended to the system prompt with no
+// delimiter, so a prompt-injected question can ask for anything.
+const allowedTable = "equities"
+
+// maxGeneratedRows caps what a generated query may return. RawQuery
+// accumulates every row into a [][]interface{} before responding, so an
+// unbounded self-join over 160k rows is an out-of-memory path bounded only
+// by the 5s statement timeout. The prompt asks for "LIMIT 50 or fewer";
+// this is what makes that true.
+const maxGeneratedRows = 50
 
 // unsupportedMarker is what the model returns when a question needs data
 // the equities table doesn't hold. Cheaper than letting it invent a join
@@ -205,6 +239,11 @@ func (q *QueryService) GenerateSQL(ctx context.Context, question string, qc Quer
 	if err := validateSQL(sql); err != nil {
 		return "", fmt.Errorf("unsafe SQL rejected: %w", err)
 	}
+	if bounded, changed := enforceRowLimit(sql); changed {
+		slog.Warn("[query] generated SQL exceeded the row cap; rewriting",
+			"cap", maxGeneratedRows, "original", sql)
+		sql = bounded
+	}
 
 	return sql, nil
 }
@@ -255,6 +294,11 @@ func (q *QueryService) RepairSQL(ctx context.Context, question, failedSQL, dbErr
 	}
 	if err := validateSQL(sql); err != nil {
 		return "", fmt.Errorf("unsafe SQL rejected: %w", err)
+	}
+	if bounded, changed := enforceRowLimit(sql); changed {
+		slog.Warn("[query] repaired SQL exceeded the row cap; rewriting",
+			"cap", maxGeneratedRows, "original", sql)
+		sql = bounded
 	}
 	return sql, nil
 }
@@ -307,10 +351,96 @@ func validateSQL(sql string) error {
 		return fmt.Errorf("query must contain a WHERE clause")
 	}
 
+	// Comments are forbidden by the prompt, and a comment is the standard
+	// way to make a keyword check read one thing and the engine read
+	// another. Enforce rather than request.
+	if commentPattern.MatchString(sql) {
+		return fmt.Errorf("query must not contain comments")
+	}
+
+	// Table scoping. The prompt says equities is the only readable table,
+	// but the user's question is appended to that prompt with no delimiter,
+	// so a question that says "ignore the above" can ask for anything —
+	// including QuestDB's system tables. Names bound by WITH ... AS are
+	// allowed because they are defined inside this statement.
+	if err := checkTableScope(sql); err != nil {
+		return err
+	}
+
 	// Reject excessively long queries (likely injection attempts)
 	if len(sql) > 2000 {
 		return fmt.Errorf("query too long (%d chars)", len(sql))
 	}
 
 	return nil
+}
+
+// checkTableScope verifies every FROM / JOIN target is either the equities
+// table or a CTE the query defines itself.
+func checkTableScope(sql string) error {
+	ctes := make(map[string]bool)
+	for _, m := range cteNamePattern.FindAllStringSubmatch(sql, -1) {
+		ctes[strings.ToLower(m[1])] = true
+	}
+	for _, m := range tableRefPattern.FindAllStringSubmatch(sql, -1) {
+		name := strings.ToLower(m[1])
+		if name == allowedTable || ctes[name] {
+			continue
+		}
+		return fmt.Errorf("query may only read the %s table, got %q", allowedTable, m[1])
+	}
+	return nil
+}
+
+// enforceRowLimit guarantees the statement returns at most maxGeneratedRows.
+//
+// The prompt asks for "LIMIT 50 or fewer" and the model usually complies,
+// but nothing checked, and RawQuery accumulates every returned row into a
+// [][]interface{} before responding — so a self-join that forgot its LIMIT
+// is an out-of-memory path bounded only by the 5s statement timeout.
+//
+// Rewrites rather than rejects. A missing or oversized LIMIT is the model
+// being sloppy about a formatting rule, not the user asking something
+// unreasonable, and validateSQL failures are not fed to RepairSQL — so
+// rejecting here would dead-end a question that is otherwise fine.
+// Returns the SQL to run and whether it had to be changed.
+func enforceRowLimit(sql string) (string, bool) {
+	trimmed := strings.TrimRight(strings.TrimSpace(sql), ";")
+
+	m := trailingLimitPattern.FindStringSubmatchIndex(trimmed)
+	if m == nil {
+		// No trailing LIMIT at all. Appending one is safe precisely
+		// because we just confirmed there is not already one to conflict
+		// with, and LIMIT is the last clause in QuestDB's grammar.
+		return fmt.Sprintf("%s LIMIT %d", trimmed, maxGeneratedRows), true
+	}
+
+	groups := trailingLimitPattern.FindStringSubmatch(trimmed)
+	head := strings.TrimRight(trimmed[:m[0]], " \t\n")
+
+	// Ranged form: LIMIT lo, hi returns rows lo..hi, so the span is what
+	// needs bounding, not hi itself.
+	if groups[2] != "" {
+		lo, hi := atoiSafe(groups[1]), atoiSafe(groups[2])
+		if hi-lo <= maxGeneratedRows {
+			return trimmed, false
+		}
+		return fmt.Sprintf("%s LIMIT %d, %d", head, lo, lo+maxGeneratedRows), true
+	}
+
+	if n := atoiSafe(groups[1]); n <= maxGeneratedRows && n > 0 {
+		return trimmed, false
+	}
+	return fmt.Sprintf("%s LIMIT %d", head, maxGeneratedRows), true
+}
+
+// atoiSafe parses a run of digits the regex already matched. A value too
+// large for an int saturates, which then trips the clamp above — the right
+// outcome for "LIMIT 99999999999999999999".
+func atoiSafe(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return math.MaxInt32
+	}
+	return n
 }
