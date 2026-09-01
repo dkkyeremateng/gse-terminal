@@ -57,18 +57,31 @@ func rankMovers(items []repository.MarketSummaryItem, minVolume int64) (gainers,
 	return gainers, losers
 }
 
-// symbolRe validates that a ticker symbol starts with an uppercase
-// letter, optionally followed by up to 9 uppercase letters or digits
-// (so 1–10 chars total). GSE tickers are alphabetic-prefixed —
-// "MTNGH", "GCB", "EGL" — and a leading digit was almost certainly an
+// symbolRe validates that a ticker symbol starts with an uppercase letter
+// and continues with uppercase letters or digits, optionally in
+// space- or hyphen-separated groups. GSE tickers are alphabetic-prefixed
+// — "MTNGH", "GCB", "EGL" — and a leading digit was almost certainly an
 // LLM hallucination or typo. Rejecting all-numeric "symbols" prevents
 // nonsense queries from bouncing through the data layer and returning
 // empty rows. Applied to all user-supplied symbol parameters before
 // they reach the database layer.
-var symbolRe = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,9}$`)
+//
+// The separator groups matter: the exchange lists preference shares and
+// rights issues under tickers that are not a single alphanumeric run
+// — "SCB PREF", "CAL PREF", "GGBL RE", "ALW RE" — and one historical
+// listing is hyphenated, "SG-SSB". A stricter pattern rejected all of
+// them at the handler, so 4,458 rows of real history could not be
+// queried at all. A separator must sit between two alphanumeric runs, so
+// leading, trailing and repeated separators are still rejected.
+var symbolRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:[ -][A-Z0-9]+)*$`)
+
+// symbolMaxLen bounds the whole symbol. The longest real GSE ticker is
+// well under this; the cap only stops an unbounded string reaching the
+// query layer.
+const symbolMaxLen = 16
 
 func validateSymbol(sym string) bool {
-	return symbolRe.MatchString(sym)
+	return len(sym) <= symbolMaxLen && symbolRe.MatchString(sym)
 }
 
 func (s *Server) HandleGetHistory(w http.ResponseWriter, r *http.Request) {

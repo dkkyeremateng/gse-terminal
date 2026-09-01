@@ -30,3 +30,28 @@ func TestEmptyBriefingPayload(t *testing.T) {
 		t.Fatalf("insights length = %d, want 0", len(insights))
 	}
 }
+
+func TestValidateSymbol(t *testing.T) {
+	valid := []string{
+		"MTNGH", "GCB", "EGL", "A", "SOGEGHRT4",
+		// Preference shares, rights issues and one hyphenated historical
+		// listing. All are real GSE tickers present in the price history.
+		"SCB PREF", "CAL PREF", "GGBL RE", "ALW RE", "SG-SSB",
+	}
+	for _, s := range valid {
+		if !validateSymbol(s) {
+			t.Errorf("validateSymbol(%q) = false, want true", s)
+		}
+	}
+
+	invalid := []string{
+		"", " ", "-", "123", "1MTN", "mtngh", "MTN;DROP", "MTN'--",
+		" SCB", "SCB ", "SCB  PREF", "SCB--SSB", "SCB-", "-SCB",
+		"ABCDEFGHIJKLMNOPQ", // longer than symbolMaxLen
+	}
+	for _, s := range invalid {
+		if validateSymbol(s) {
+			t.Errorf("validateSymbol(%q) = true, want false", s)
+		}
+	}
+}
