@@ -125,3 +125,44 @@ func TestLastLines(t *testing.T) {
 		t.Error("short input should pass through unchanged")
 	}
 }
+
+func TestTradingDaysBetween(t *testing.T) {
+	d := func(s string) time.Time {
+		v, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			t.Fatalf("bad date %q: %v", s, err)
+		}
+		return v
+	}
+
+	cases := []struct {
+		name     string
+		from, to string
+		want     int
+	}{
+		{"same day", "2026-09-01", "2026-09-01", 0},
+		{"consecutive weekdays", "2026-09-01", "2026-09-02", 1},
+		// Fri -> Mon is one trading day: the weekend is not missing data,
+		// or every Monday would look like a multi-day outage.
+		{"across a weekend", "2026-09-04", "2026-09-07", 1},
+		{"weekend only", "2026-09-04", "2026-09-06", 0},
+		{"a full week", "2026-09-01", "2026-09-08", 5},
+		// 2026-03-06 is Independence Day, a Friday.
+		{"skips a holiday", "2026-03-05", "2026-03-09", 1},
+		{"to before from", "2026-09-08", "2026-09-01", 0},
+	}
+	for _, c := range cases {
+		if got := tradingDaysBetween(d(c.from), d(c.to)); got != c.want {
+			t.Errorf("%s: tradingDaysBetween(%s, %s) = %d, want %d",
+				c.name, c.from, c.to, got, c.want)
+		}
+	}
+}
+
+func TestTradingDaysBetweenIgnoresClockTime(t *testing.T) {
+	from := time.Date(2026, 9, 1, 23, 59, 0, 0, time.UTC)
+	to := time.Date(2026, 9, 2, 0, 1, 0, 0, time.UTC)
+	if got := tradingDaysBetween(from, to); got != 1 {
+		t.Errorf("got %d, want 1 — the time of day must not affect the count", got)
+	}
+}

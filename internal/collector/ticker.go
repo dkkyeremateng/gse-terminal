@@ -153,6 +153,17 @@ type PostScrapeHook interface {
 const (
 	scrapeHourUTC   = 16
 	scrapeMinuteUTC = 30
+
+	// Retry window for a scheduled run that ingested nothing. The cutoff
+	// bounds it, so a genuinely dataless day -- an unlisted holiday -- stops
+	// after a few attempts rather than retrying until the next schedule.
+	scrapeRetryInterval = 20 * time.Minute
+	scrapeRetryCutoff   = 3 * time.Hour
+
+	// Freshness watchdog. Two trading days allows one wholly missed session
+	// before escalating, so a single late publication is not an outage.
+	freshnessCheckInterval = 1 * time.Hour
+	staleTradingDays       = 2
 )
 
 func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInvalidator, auditLog AuditSink, cfg ScraperConfig, broadcast chan []byte, anomaly PostScrapeHook) {
@@ -170,6 +181,8 @@ func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheIn
 		}
 		logger.Info("GSE scraper initialized", "source", sourceName,
 			"script", cfg.ScriptPath, "schedule", "15:30 UTC daily")
+
+		go watchDataFreshness(ctx, qdb, auditLog)
 
 		// Seed scrape on boot, but only when the newest trading day we
 		// hold is already behind the market. Skipping the no-op case
@@ -221,13 +234,17 @@ func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheIn
 				logger.Info("Shutting down tick engine")
 				return
 			case <-timer.C:
-				scrapeGSE(ctx, qdb, cache, auditLog, cfg, broadcast, anomaly)
+				scrapeWithRetry(ctx, qdb, cache, auditLog, cfg, broadcast, anomaly)
 			}
 		}
 	}()
 }
 
-func scrapeGSE(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInvalidator, auditLog AuditSink, cfg ScraperConfig, broadcast chan []byte, anomaly PostScrapeHook) {
+// scrapeGSE reports whether rows were actually ingested. Every early return
+// -- download failure, unreadable file, ingest error, empty export -- yields
+// false so the caller can decide whether to retry. Previously all of these
+// were indistinguishable from success to the scheduler.
+func scrapeGSE(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInvalidator, auditLog AuditSink, cfg ScraperConfig, broadcast chan []byte, anomaly PostScrapeHook) bool {
 	logger := slog.With("component", "collector")
 	tradingDate := getLastTradingDate(time.Now().UTC())
 
@@ -240,14 +257,14 @@ func scrapeGSE(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInva
 				"stage": "download",
 			})
 		}
-		return
+		return false
 	}
 	defer os.Remove(csvPath)
 
 	file, err := os.Open(csvPath)
 	if err != nil {
 		logger.Error("Cannot read downloaded GSE export", "path", csvPath, "error", err)
-		return
+		return false
 	}
 	defer file.Close()
 
@@ -266,14 +283,14 @@ func scrapeGSE(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInva
 				"records": res.Inserted,
 			})
 		}
-		return
+		return false
 	}
 	if res.Inserted == 0 {
 		// The site returns an empty grid for a date it has no data for —
 		// an unlisted holiday, or a session whose file hasn't been
 		// published yet. Nothing to broadcast or invalidate.
 		logger.Warn("GSE export contained no rows", "tradingDate", tradingDate.Format("2006-01-02"), "skipped", res.Skipped)
-		return
+		return false
 	}
 	if res.Skipped > 0 {
 		logger.Warn("Skipped malformed rows in GSE export", "count", res.Skipped)
@@ -338,6 +355,111 @@ func scrapeGSE(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInva
 		anomaly.RunPostScrape(ctx, qdb, symbols)
 		anomaly.DispatchWatchListDigest(ctx, liveData)
 	}
+
+	return true
+}
+
+// scrapeWithRetry runs a scheduled scrape and, when it ingests nothing,
+// keeps retrying on an interval until it succeeds or the cutoff passes.
+//
+// The exchange does not publish at a fixed minute, so any single scheduled
+// time is a bet: fire before publication and the run finds an empty table,
+// logs a WARN, and waits a full day while that session is never ingested.
+// Retrying makes the scheduled time a lower bound instead, and absorbs a
+// transient download failure along the way.
+func scrapeWithRetry(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInvalidator, auditLog AuditSink, cfg ScraperConfig, broadcast chan []byte, anomaly PostScrapeHook) {
+	logger := slog.With("component", "collector")
+	deadline := time.Now().UTC().Add(scrapeRetryCutoff)
+
+	for attempt := 1; ; attempt++ {
+		if scrapeGSE(ctx, qdb, cache, auditLog, cfg, broadcast, anomaly) {
+			if attempt > 1 {
+				logger.Info("Scrape succeeded on retry", "attempt", attempt)
+			}
+			return
+		}
+		if !time.Now().UTC().Add(scrapeRetryInterval).Before(deadline) {
+			logger.Error("Scrape found no data before the retry cutoff; this session will not be ingested today",
+				"attempts", attempt, "cutoff", scrapeRetryCutoff.String())
+			if auditLog != nil {
+				auditLog.Log(ctx, "data.scrape.exhausted", "ingestion", sourceName, map[string]interface{}{
+					"attempts": attempt,
+					"cutoff":   scrapeRetryCutoff.String(),
+				})
+			}
+			return
+		}
+		logger.Warn("Scrape ingested nothing; retrying",
+			"attempt", attempt, "retryIn", scrapeRetryInterval.String())
+
+		t := time.NewTimer(scrapeRetryInterval)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// watchDataFreshness periodically compares the newest trading date held
+// against the newest the market should have produced, and escalates when it
+// falls behind. Without it a broken scrape is invisible: the app stays
+// healthy, the site serves, and the data simply stops advancing.
+func watchDataFreshness(ctx context.Context, qdb *repository.QuestDBRepo, auditLog AuditSink) {
+	logger := slog.With("component", "collector")
+	ticker := time.NewTicker(freshnessCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			latest, err := qdb.GetLastIngestionTime(ctx)
+			if err != nil {
+				logger.Warn("Freshness check could not read the latest trading date", "error", err)
+				continue
+			}
+			expected := getLastTradingDate(time.Now().UTC())
+			behind := tradingDaysBetween(latest, expected)
+			if behind < staleTradingDays {
+				continue
+			}
+			logger.Error("Market data is stale",
+				"latestHeld", latest.Format("2006-01-02"),
+				"expected", expected.Format("2006-01-02"),
+				"tradingDaysBehind", behind)
+			if auditLog != nil {
+				auditLog.Log(ctx, "data.freshness.stale", "ingestion", sourceName, map[string]interface{}{
+					"latest_held":         latest.Format("2006-01-02"),
+					"expected":            expected.Format("2006-01-02"),
+					"trading_days_behind": behind,
+				})
+			}
+		}
+	}
+}
+
+// tradingDaysBetween counts weekday, non-holiday days after `from` up to and
+// including `to`. Weekends and Ghana public holidays are not missing data, so
+// they must not count towards staleness -- otherwise every Monday would look
+// like a two-day outage.
+func tradingDaysBetween(from, to time.Time) int {
+	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
+	to = time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+
+	n := 0
+	for d := from.AddDate(0, 0, 1); !d.After(to); d = d.AddDate(0, 0, 1) {
+		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+			continue
+		}
+		if _, isHoliday := ghanaHolidays[d.Format("2006-01-02")]; isHoliday {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // downloadDailyShares runs gse_download.py for a single trading day and
