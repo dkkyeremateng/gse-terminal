@@ -174,8 +174,33 @@ def drive_table(instance: str, from_d: date, to_d: date) -> list[list[str]]:
         instance,
         f"jQuery('#{TABLE_DOM_ID}').DataTable().page.len(-1).draw(); 'ok'",
     )
-    # Small settle for the extra page of data to arrive.
-    time.sleep(1.0)
+
+    # 3a. Wait for that redraw to land. It is asynchronous and, on this
+    #     server-side table, costs another round trip. A fixed sleep raced
+    #     it: when the response was slow the extract below ran against the
+    #     still-paginated grid and returned exactly one page -- 25 rows --
+    #     for what might be a full year, with no error and no warning. Poll
+    #     until the rendered row count matches the count the table reports
+    #     for the current filter, and fail loudly rather than write a
+    #     silently truncated CSV.
+    expected = _records_display(instance)
+    if expected is None:
+        raise RuntimeError(
+            "Table did not report recordsDisplay after the redraw."
+        )
+    if expected == 0:
+        # An empty result still renders a single placeholder row ("No data
+        # available in table") that would otherwise be extracted as data.
+        return []
+    if not wait_for(
+        lambda: _rendered_rows(instance) == expected,
+        timeout=180.0,
+    ):
+        raise RuntimeError(
+            f"Table redraw did not complete: "
+            f"{_rendered_rows(instance)} row(s) rendered but the filter "
+            f"matches {expected}. Refusing to write a partial CSV."
+        )
 
     # 4. Read the rendered grid. Grab <tr> cells in document order. The
     #    rendered table already omits the internal wdt_ID column, so each
@@ -200,6 +225,18 @@ def drive_table(instance: str, from_d: date, to_d: date) -> list[list[str]]:
     if not raw:
         raise RuntimeError("Could not read table rows from the page.")
     return json.loads(raw)
+
+
+def _rendered_rows(instance: str):
+    """Return the number of <tr> currently rendered in the table body."""
+    out = run_js(
+        instance,
+        f"document.querySelectorAll('#{TABLE_DOM_ID} tbody tr').length",
+    )
+    try:
+        return int(out)
+    except (TypeError, ValueError):
+        return None
 
 
 def _records_display(instance: str):
