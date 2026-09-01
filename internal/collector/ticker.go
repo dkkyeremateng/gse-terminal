@@ -143,11 +143,16 @@ type PostScrapeHook interface {
 // existed and every scheduled run returned "GSE export contained no rows".
 // Nothing errored; the day was simply never ingested.
 //
-// 17:00 sits beyond the latest observed publication with margin. It is one
-// observation, so the margin is deliberate rather than tight.
+// 16:30 is an hour later than the old schedule and past the point where the
+// export was still empty. Note it is 8 minutes earlier than the only
+// confirmed positive observation (16:38), so on a day the exchange publishes
+// late the run can still find an empty table. That degrades to the previous
+// behaviour for that day -- a WARN and no ingest -- rather than to anything
+// worse, and the weekday/holiday logic below is unchanged, so this applies
+// to every trading date.
 const (
-	scrapeHourUTC   = 17
-	scrapeMinuteUTC = 0
+	scrapeHourUTC   = 16
+	scrapeMinuteUTC = 30
 )
 
 func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInvalidator, auditLog AuditSink, cfg ScraperConfig, broadcast chan []byte, anomaly PostScrapeHook) {
