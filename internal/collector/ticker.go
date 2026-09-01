@@ -180,7 +180,8 @@ func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheIn
 			return
 		}
 		logger.Info("GSE scraper initialized", "source", sourceName,
-			"script", cfg.ScriptPath, "schedule", "15:30 UTC daily")
+			"script", cfg.ScriptPath,
+			"schedule", fmt.Sprintf("%02d:%02d UTC daily", scrapeHourUTC, scrapeMinuteUTC))
 
 		go watchDataFreshness(ctx, qdb, auditLog)
 
