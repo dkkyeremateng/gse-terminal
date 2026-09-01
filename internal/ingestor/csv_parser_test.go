@@ -67,6 +67,47 @@ func TestParseRecord_RejectsMissingSymbol(t *testing.T) {
 	}
 }
 
+func TestParseRecord_RejectsEmptySymbol(t *testing.T) {
+	headers := []string{"Daily Date", "Share Code"}
+	headerMap := map[string]int{
+		normalizeHeader(headers[0]): 0,
+		normalizeHeader(headers[1]): 1,
+	}
+	for _, sym := range []string{"", "   ", "**"} {
+		if _, err := parseRecord([]string{"05/03/2026", sym}, headerMap); err == nil {
+			t.Errorf("expected error for empty symbol %q", sym)
+		}
+	}
+}
+
+func TestParseRecord_StripsFootnoteMarkers(t *testing.T) {
+	headers := []string{"Daily Date", "Share Code"}
+	headerMap := map[string]int{
+		normalizeHeader(headers[0]): 0,
+		normalizeHeader(headers[1]): 1,
+	}
+	cases := map[string]string{
+		"**ALW**":     "ALW",
+		"PBC**":       "PBC",
+		"**CALPREF**": "CALPREF",
+		"ALW":         "ALW",
+		// Preference lines and rights issues are separate instruments and
+		// must survive untouched.
+		"SCB PREF": "SCB PREF",
+		"GGBL RE":  "GGBL RE",
+	}
+	for in, want := range cases {
+		tick, err := parseRecord([]string{"05/03/2026", in}, headerMap)
+		if err != nil {
+			t.Errorf("parseRecord(%q) unexpected error: %v", in, err)
+			continue
+		}
+		if tick.Symbol != want {
+			t.Errorf("parseRecord(%q).Symbol = %q, want %q", in, tick.Symbol, want)
+		}
+	}
+}
+
 func TestParseRecord_BadDate(t *testing.T) {
 	headers := []string{"Daily Date", "Share Code"}
 	headerMap := map[string]int{normalizeHeader(headers[0]): 0, normalizeHeader(headers[1]): 1}
@@ -96,6 +137,13 @@ func TestParseIntClean(t *testing.T) {
 		"1,234,567": 1234567,
 		"":          0,
 		"abc":       0,
+		// GSE's historical exports carry four decimal places. Folding them
+		// into the integer would multiply every volume by 10^4.
+		"200.0000":     200,
+		"3707400.0000": 3707400,
+		"0.0000":       0,
+		"1234.9":       1234,
+		"1,234.0000":   1234,
 	}
 	for in, want := range cases {
 		if got := parseIntClean(in); got != want {
