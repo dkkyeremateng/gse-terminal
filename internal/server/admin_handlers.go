@@ -193,6 +193,36 @@ func (s *Server) regenerateBriefing(parent context.Context) {
 	}
 }
 
+// revokeUserSessions invalidates every outstanding session for userID —
+// access JWTs and refresh cookies alike — by bumping the user's session
+// epoch. Call it from any admin action that changes what the user's
+// existing sessions are entitled to do.
+//
+// Without this, a role change was purely cosmetic on live sessions: the
+// current JWT carried the old role until it expired, and silent refresh
+// then minted a *fresh* one from the role cached in Redis at login time,
+// sliding the 90-day refresh TTL forward each time. A demoted admin kept
+// admin for as long as they kept browsing.
+//
+// Soft-fail: Postgres is the durable source of truth and the next login
+// re-reads it. Log loudly, because a failure here means the revocation
+// the operator just performed silently did not take effect on live
+// sessions — exactly the condition this function exists to prevent.
+func (s *Server) revokeUserSessions(r *http.Request, userID int, reason string) {
+	if s.redisRepo == nil {
+		return
+	}
+	epoch, err := s.redisRepo.BumpSessionEpoch(r.Context(), userID)
+	if err != nil {
+		LoggerFromCtx(r.Context()).Error(
+			"[admin] session revocation failed; the user's existing sessions retain their previous privileges until expiry",
+			"error", err, "user_id", userID, "reason", reason)
+		return
+	}
+	LoggerFromCtx(r.Context()).Info("[admin] sessions revoked",
+		"user_id", userID, "reason", reason, "epoch", epoch)
+}
+
 func (s *Server) HandleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 	users, err := s.pgRepo.GetAllUsers(r.Context())
 	if err != nil {
@@ -383,6 +413,12 @@ func (s *Server) HandleAdminUserUpdateRole(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// The new role only reaches the user's sessions if we invalidate the
+	// old ones — both the JWT they are holding and the role cached
+	// alongside their refresh token. They re-authenticate and pick the
+	// new role up on the next login.
+	s.revokeUserSessions(r, id, "role_change")
+
 	s.auditLog.Log(r.Context(), audit.ActionUserRoleSet, "Update", "Role", map[string]interface{}{
 		"role": newRole,
 	})
@@ -450,6 +486,12 @@ func (s *Server) HandleAdminUserDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The row is gone but the credentials are not: the access JWT is
+	// self-contained and the refresh record lives in Redis with its own
+	// 90-day TTL, and silent refresh never re-checks Postgres. Without
+	// this bump a deleted account keeps a working session.
+	s.revokeUserSessions(r, id, "user_deleted")
+
 	s.auditLog.Log(r.Context(), audit.ActionUserDelete, "Delete", "Account", nil)
 
 	if wantsJSON(r) {
@@ -499,6 +541,18 @@ func (s *Server) HandleAdminUserToggleLock(w http.ResponseWriter, r *http.Reques
 				LoggerFromCtx(r.Context()).Warn("[admin] failed to clear user lock in redis", "error", err, "user_id", id)
 			}
 		}
+	}
+
+	// The lock sentinel above only gates silent refresh, so a locked user
+	// keeps whatever access JWT they already hold until it expires — up
+	// to 24h of continued access after being locked out. Bumping the
+	// epoch closes that window; the sentinel stays because it is what
+	// keeps their refresh cookie dead afterwards.
+	//
+	// Only on lock. Unlocking does not need to invalidate anything, and
+	// bumping there would sign out a user we just restored.
+	if locked {
+		s.revokeUserSessions(r, id, "user_locked")
 	}
 
 	status := "unlocked"

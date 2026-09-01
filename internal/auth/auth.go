@@ -53,6 +53,13 @@ type APIKeyResolver interface {
 type TokenRevoker interface {
 	Revoke(ctx context.Context, jti string, ttl time.Duration) error
 	IsRevoked(ctx context.Context, jti string) (bool, error)
+	// CheckSession answers both per-request questions in one round
+	// trip: is this jti revoked, and what is the user's current session
+	// epoch. Middleware compares the returned epoch against the token's
+	// own `sess` claim and refuses anything stale, which is what makes
+	// a role change or a deletion take effect on an already-issued JWT
+	// rather than 24 hours later.
+	CheckSession(ctx context.Context, jti string, userID int) (revoked bool, epoch int, err error)
 }
 
 // RefreshTokenStore persists long-lived refresh tokens out-of-band of
@@ -64,13 +71,17 @@ type TokenRevoker interface {
 //
 // Username + role are cached in the store itself so silent-refresh on
 // an expired JWT is a single Redis GET — no DB round-trip on every
-// request from an idle user after a 24h gap. Role/lock changes take
-// effect on the next explicit login (which rotates the refresh value);
-// revoking a user's refresh tokens server-wide is handled via
-// DeleteRefreshToken from whichever admin path needs that guarantee.
+// request from an idle user after a 24h gap. The cached role would go
+// stale after an admin demotes someone, so every stored token also
+// carries the session epoch it was issued under; BumpSessionEpoch on
+// the admin side invalidates all of them at once. See sessionEpochKey
+// in the Redis repo.
 type RefreshTokenStore interface {
-	StoreRefreshToken(ctx context.Context, token string, userID int, username, role string, ttl time.Duration) error
-	LookupRefreshToken(ctx context.Context, token string) (userID int, username, role string, err error)
+	StoreRefreshToken(ctx context.Context, token string, userID int, username, role string, epoch int, ttl time.Duration) error
+	LookupRefreshToken(ctx context.Context, token string) (userID int, username, role string, epoch int, err error)
+	// SessionEpoch reads the user's current epoch so newly issued
+	// credentials can be stamped with it.
+	SessionEpoch(ctx context.Context, userID int) (int, error)
 	TouchRefreshToken(ctx context.Context, token string, ttl time.Duration) error
 	DeleteRefreshToken(ctx context.Context, token string) error
 	// IsUserLocked reports whether an admin has locked the user mid-
@@ -165,7 +176,7 @@ func newRefreshToken() (string, error) {
 // silent refresh on expired JWTs can rebuild the session in one
 // Redis GET — no DB round-trip per request from idle users.
 // No-ops when the refresh store isn't wired (tests / bare instances).
-func (s *AuthService) IssueRefresh(ctx context.Context, w http.ResponseWriter, userID int, username, role string) error {
+func (s *AuthService) IssueRefresh(ctx context.Context, w http.ResponseWriter, userID int, username, role string, epoch int) error {
 	if s.refreshStore == nil {
 		return nil
 	}
@@ -173,7 +184,7 @@ func (s *AuthService) IssueRefresh(ctx context.Context, w http.ResponseWriter, u
 	if err != nil {
 		return err
 	}
-	if err := s.refreshStore.StoreRefreshToken(ctx, tok, userID, username, role, RefreshTokenTTL); err != nil {
+	if err := s.refreshStore.StoreRefreshToken(ctx, tok, userID, username, role, epoch, RefreshTokenTTL); err != nil {
 		return err
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -186,6 +197,23 @@ func (s *AuthService) IssueRefresh(ctx context.Context, w http.ResponseWriter, u
 		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
+}
+
+// SessionEpoch returns the user's current session epoch, or 0 when the
+// refresh store isn't wired or Redis is unreachable. Soft-failing to 0
+// keeps a Redis blip from blocking logins; the resulting session is
+// stamped epoch 0 and will be refused on its next request once Redis
+// recovers and reports the real (non-zero) epoch — a forced re-login,
+// not an unauthorised session.
+func (s *AuthService) SessionEpoch(ctx context.Context, userID int) int {
+	if s.refreshStore == nil {
+		return 0
+	}
+	epoch, err := s.refreshStore.SessionEpoch(ctx, userID)
+	if err != nil {
+		return 0
+	}
+	return epoch
 }
 
 // ClearRefresh invalidates the refresh token (if present) in the store
@@ -258,7 +286,7 @@ func (s *AuthService) silentRefresh(w http.ResponseWriter, r *http.Request) (jwt
 	if err != nil || cookie.Value == "" {
 		return nil, fmt.Errorf("no refresh cookie")
 	}
-	userID, username, role, err := s.refreshStore.LookupRefreshToken(r.Context(), cookie.Value)
+	userID, username, role, tokenEpoch, err := s.refreshStore.LookupRefreshToken(r.Context(), cookie.Value)
 	if err != nil || userID == 0 {
 		return nil, fmt.Errorf("refresh token not found")
 	}
@@ -282,7 +310,25 @@ func (s *AuthService) silentRefresh(w http.ResponseWriter, r *http.Request) (jwt
 		_ = s.refreshStore.DeleteRefreshToken(r.Context(), cookie.Value)
 		return nil, fmt.Errorf("user locked")
 	}
-	tokenStr, err := s.GenerateToken(userID, username, role)
+	// Epoch check. The username + role in this record were cached at
+	// login; if an admin has since changed the user's role or deleted
+	// the account, that cache is a lie and minting a JWT from it would
+	// hand back the stale privileges. Bumping the epoch is what the
+	// admin paths do, and it lands here.
+	//
+	// Hard-fail on a Redis error (unlike the lock check above): we
+	// cannot confirm the cached role is still valid, and the cost of
+	// being wrong is an unauthorised privilege level, not an
+	// inconvenience. The user still has their password.
+	currentEpoch, epochErr := s.refreshStore.SessionEpoch(r.Context(), userID)
+	if epochErr != nil {
+		return nil, fmt.Errorf("session epoch unavailable: %w", epochErr)
+	}
+	if tokenEpoch != currentEpoch {
+		_ = s.refreshStore.DeleteRefreshToken(r.Context(), cookie.Value)
+		return nil, fmt.Errorf("session superseded")
+	}
+	tokenStr, err := s.GenerateToken(userID, username, role, currentEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +354,7 @@ func (s *AuthService) silentRefresh(w http.ResponseWriter, r *http.Request) (jwt
 
 // GenerateToken issues a fresh JWT bound to a unique jti so the token can
 // be individually revoked on logout.
-func (s *AuthService) GenerateToken(userID int, username, role string) (string, error) {
+func (s *AuthService) GenerateToken(userID int, username, role string, epoch int) (string, error) {
 	jti, err := newJTI()
 	if err != nil {
 		return "", err
@@ -321,6 +367,12 @@ func (s *AuthService) GenerateToken(userID int, username, role string) (string, 
 		"jti":      jti,
 		"iat":      now.Unix(),
 		"exp":      now.Add(AccessTokenTTL).Unix(),
+		// sess pins the token to the session epoch current at issue
+		// time. Middleware refuses the token once the stored epoch
+		// moves past it, so an admin demoting or deleting a user takes
+		// effect on their next request rather than when the JWT
+		// happens to expire.
+		"sess": epoch,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(s.secretKey))
@@ -450,15 +502,26 @@ func (s *AuthService) Middleware(next http.Handler) http.Handler {
 		}
 	populateContext:
 
-		// Revocation check (logout / forced sign-out). Soft-fail on revoker
-		// errors so a Redis blip doesn't lock everyone out.
+		// Revocation + epoch check (logout, role change, lock, delete),
+		// fused into one Redis round trip. Soft-fail on Redis errors so a
+		// blip doesn't sign everyone out — the same trade the revocation
+		// check has always made. A stale epoch drops the caller to guest
+		// rather than 401ing, matching how an invalid cookie is handled
+		// below: public pages keep working, and anything gated bounces
+		// through the normal login redirect.
 		if s.revoker != nil {
-			if jti, ok := claims["jti"].(string); ok && jti != "" {
-				if revoked, err := s.revoker.IsRevoked(r.Context(), jti); err == nil && revoked {
-					http.SetCookie(w, &http.Cookie{
-						Name: "session", Value: "", Path: "/", MaxAge: -1,
-						HttpOnly: true, Secure: s.SecureCookies, SameSite: http.SameSiteLaxMode,
-					})
+			jti, _ := claims["jti"].(string)
+			uid, _ := claims["user_id"].(float64)
+			if jti != "" {
+				revoked, currentEpoch, err := s.revoker.CheckSession(r.Context(), jti, int(uid))
+				// A token minted before the `sess` claim existed reads as
+				// epoch 0, which matches any user who has never been
+				// demoted, locked, or deleted. Anyone who has will have a
+				// non-zero epoch, so those tokens are refused — which is
+				// the intended upgrade path.
+				tokenEpoch, _ := claims["sess"].(float64)
+				if err == nil && (revoked || int(tokenEpoch) != currentEpoch) {
+					s.clearSessionCookie(w)
 					next.ServeHTTP(w, r)
 					return
 				}

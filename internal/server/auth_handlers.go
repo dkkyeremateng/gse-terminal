@@ -202,7 +202,12 @@ func (s *Server) HandleSignupPost(w http.ResponseWriter, r *http.Request) {
 // at least once every 90 days never see a login screen. Shared by
 // email/password login, signup, and Google OAuth.
 func (s *Server) issueSessionCookie(w http.ResponseWriter, r *http.Request, userID int, username, role string) error {
-	token, err := s.authSvc.GenerateToken(userID, username, role)
+	// Stamp both credentials with the user's current session epoch so a
+	// later role change / lock / delete can invalidate them wholesale.
+	// Read once and shared, so the JWT and the refresh record can never
+	// disagree about which epoch this session belongs to.
+	epoch := s.authSvc.SessionEpoch(r.Context(), userID)
+	token, err := s.authSvc.GenerateToken(userID, username, role, epoch)
 	if err != nil {
 		return err
 	}
@@ -218,7 +223,7 @@ func (s *Server) issueSessionCookie(w http.ResponseWriter, r *http.Request, user
 	// Issue the refresh cookie. Soft-fail: if Redis is down the
 	// session still works for 24h, we just can't silently renew after
 	// that.
-	if err := s.authSvc.IssueRefresh(r.Context(), w, userID, username, role); err != nil {
+	if err := s.authSvc.IssueRefresh(r.Context(), w, userID, username, role, epoch); err != nil {
 		LoggerFromCtx(r.Context()).Warn("[auth] refresh issue failed", "error", err, "user_id", userID)
 	}
 	return nil

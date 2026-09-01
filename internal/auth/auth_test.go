@@ -35,7 +35,7 @@ func TestValidatePassword(t *testing.T) {
 
 func TestGenerateAndParseToken(t *testing.T) {
 	svc := NewAuthService("test-secret-do-not-use-in-prod", false)
-	tok, err := svc.GenerateToken(42, "alice", "admin")
+	tok, err := svc.GenerateToken(42, "alice", "admin", 0)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestGenerateAndParseToken(t *testing.T) {
 
 func TestParseToken_RejectsTamperedSignature(t *testing.T) {
 	svc := NewAuthService("test-secret", false)
-	tok, _ := svc.GenerateToken(1, "x", "user")
+	tok, _ := svc.GenerateToken(1, "x", "user", 0)
 	tampered := tok[:len(tok)-4] + "XXXX"
 	if _, err := svc.ParseToken(tampered); err == nil {
 		t.Error("expected error parsing tampered token")
