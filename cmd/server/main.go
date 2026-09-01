@@ -192,6 +192,13 @@ func main() {
 			// same trading day. RedisRepo satisfies push.DigestDedupe
 			// via SETNX on a "digest:sent:<day>:<uid>" key.
 			pushSvc.SetDigestDedupe(redisRepo)
+			// Narrow the set of hosts we will POST notifications to. The
+			// endpoint comes from the browser, so without this any
+			// authenticated user could aim it at an internal service.
+			if len(cfg.WebPushAllowedHosts) > 0 {
+				pushSvc.SetEndpointValidator(push.NewEndpointValidator(cfg.WebPushAllowedHosts...))
+			}
+			slog.Info("Web Push endpoint allowlist", "hosts", pushSvc.Validator().AllowedHosts())
 			alertEvaluator.SetWebPusher(pushSvc)
 			// The same service powers the admin test endpoint at
 			// /v1/admin/push/test-digest. Wired through the server's
