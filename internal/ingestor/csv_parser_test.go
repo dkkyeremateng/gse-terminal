@@ -91,10 +91,12 @@ func TestParseRecord_StripsFootnoteMarkers(t *testing.T) {
 		"PBC**":       "PBC",
 		"**CALPREF**": "CALPREF",
 		"ALW":         "ALW",
-		// Preference lines and rights issues are separate instruments and
-		// must survive untouched.
-		"SCB PREF": "SCB PREF",
-		"GGBL RE":  "GGBL RE",
+		// Rights issues are separate instruments and must survive
+		// untouched. "SCB PREF" is no longer among them: it is an alias
+		// of SCBPREF, the same security under the spelling the exchange
+		// uses today — see TestParseRecord_FoldsAliasSpellings.
+		"GGBL RE": "GGBL RE",
+		"ALW RE":  "ALW RE",
 	}
 	for in, want := range cases {
 		tick, err := parseRecord([]string{"05/03/2026", in}, headerMap)
@@ -281,6 +283,55 @@ func TestField_BoundsChecked(t *testing.T) {
 	} {
 		if got := field(rec, tc.idx); got != tc.want {
 			t.Errorf("field(%v, %d) = %q, want %q", rec, tc.idx, got, tc.want)
+		}
+	}
+}
+
+// GSE published two spellings for the same instrument, splitting its stored
+// history in two. Folding at ingest keeps a re-appearance of the old form
+// from starting a second series again.
+func TestParseRecord_FoldsAliasSpellings(t *testing.T) {
+	hm := map[string]int{"dailydate": 0, "sharecode": 1}
+
+	cases := map[string]string{
+		"SCB PREF":   "SCBPREF",
+		"CAL PREF":   "CALPREF",
+		"SCB PREF**": "SCBPREF", // footnote markers are stripped first
+		"SCBPREF":    "SCBPREF", // already canonical, unchanged
+		"CALPREF":    "CALPREF",
+	}
+	for in, want := range cases {
+		tick, err := parseRecord([]string{"01/09/2026", in}, hm)
+		if err != nil {
+			t.Errorf("parseRecord(%q): %v", in, err)
+			continue
+		}
+		if tick.Symbol != want {
+			t.Errorf("parseRecord(%q).Symbol = %q, want %q", in, tick.Symbol, want)
+		}
+	}
+}
+
+// Distinct securities must not be folded together. A preference share and a
+// rights issue are separate instruments from the ordinary line, and SG-SSB's
+// hyphen is part of its only spelling.
+func TestSymbolAliases_DoNotOverreach(t *testing.T) {
+	for _, sym := range []string{"SG-SSB", "GGBL RE", "ALW RE", "SCB", "CAL", "GGBL", "ALW"} {
+		if got := canonicalSymbol(sym); got != sym {
+			t.Errorf("canonicalSymbol(%q) = %q; that is a different security, not an alias", sym, got)
+		}
+	}
+}
+
+// Every alias target must itself be a ticker the API can query, or ingest
+// would write rows no endpoint can reach.
+func TestSymbolAliases_TargetsAreValid(t *testing.T) {
+	for from, to := range symbolAliases {
+		if !ValidSymbol(to) {
+			t.Errorf("alias %q -> %q: target is not a well-formed ticker", from, to)
+		}
+		if _, chained := symbolAliases[to]; chained {
+			t.Errorf("alias %q -> %q: target is itself an alias, so folding depends on map order", from, to)
 		}
 	}
 }

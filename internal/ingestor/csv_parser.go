@@ -27,6 +27,45 @@ import (
 // matches, so enforcing this at ingest drops no real data.
 var symbolRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:[ -][A-Z0-9]+)*$`)
 
+// symbolAliases folds spellings the exchange has used for the same
+// instrument onto one canonical ticker.
+//
+// GSE has published two spellings for each of these, and the split ran
+// through the stored history: 'SCB PREF' covered 2010-01-04 to 2025-09-30
+// and 'SCBPREF' 2024-02-12 onward, so neither series showed the whole
+// instrument. They are the same security — the 2024 row counts are
+// complementary (145 + 103 = 248, one full trading year), the price is
+// identical either side of the switchover, and on the three dates where
+// both appear the values agree or the legacy row carries no published
+// price at all.
+//
+// The unspaced form is canonical because it is what the exchange emits
+// today, and therefore what the daily scrape keeps writing.
+//
+// This is not a one-time correction that the data migration made
+// redundant: both spellings appeared on the SAME session (2024-02-12), so
+// the export is not internally consistent and could emit the old form
+// again. Folding at ingest means it lands on the existing series instead
+// of starting a second one.
+//
+// Only add an entry here when the two spellings are genuinely one
+// instrument. 'SG-SSB' keeps its hyphen because nothing else refers to it,
+// and preference shares and rights issues ('GGBL RE', 'ALW RE') are
+// distinct securities from their ordinary lines, not aliases of them.
+var symbolAliases = map[string]string{
+	"SCB PREF": "SCBPREF",
+	"CAL PREF": "CALPREF",
+}
+
+// canonicalSymbol resolves a ticker to the spelling the rest of the system
+// stores it under.
+func canonicalSymbol(sym string) string {
+	if canon, ok := symbolAliases[sym]; ok {
+		return canon
+	}
+	return sym
+}
+
 // SymbolMaxLen bounds the whole ticker. The longest real GSE symbol is well
 // under this; the cap only stops an unbounded string being stored.
 const SymbolMaxLen = 16
@@ -229,6 +268,11 @@ func parseRecord(record []string, headerMap map[string]int) (repository.Tick, er
 		if !ValidSymbol(t.Symbol) {
 			return t, fmt.Errorf("symbol %q is not a well-formed ticker", t.Symbol)
 		}
+		// Fold known alternate spellings onto one series. Done after
+		// validation so an alias entry cannot smuggle past the charset
+		// check, and after asterisk-stripping so a footnote-marked
+		// "SCB PREF**" still resolves.
+		t.Symbol = canonicalSymbol(t.Symbol)
 	} else {
 		return t, fmt.Errorf("no symbol column found") // Required
 	}
