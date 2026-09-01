@@ -130,12 +130,26 @@ type PostScrapeHook interface {
 
 // StartDaemon initializes a background worker that pulls the official GSE
 // "Daily Shares & ETFs" table via scripts/gse_download.py once a day at
-// 15:30 UTC. `cache` and `auditLog` may both be nil for tests / minimal
+// scrapeHourUTC. `cache` and `auditLog` may both be nil for tests / minimal
 // deployments.
 //
 // The scraper needs python3 plus the chrome-agent CLI on PATH. When the
 // script isn't present the daemon logs and exits rather than failing a
 // browser launch every afternoon — CSV upload remains the ingest path.
+// The exchange publishes the "Daily Shares & ETFs" table some time after
+// the close, and not at a fixed minute. Measured on 2026-09-01: the export
+// was still empty at 15:22 and again at 15:30, and held 41 rows when next
+// probed at 16:38 — so the previous 15:30 schedule fired before the data
+// existed and every scheduled run returned "GSE export contained no rows".
+// Nothing errored; the day was simply never ingested.
+//
+// 17:00 sits beyond the latest observed publication with margin. It is one
+// observation, so the margin is deliberate rather than tight.
+const (
+	scrapeHourUTC   = 17
+	scrapeMinuteUTC = 0
+)
+
 func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheInvalidator, auditLog AuditSink, cfg ScraperConfig, broadcast chan []byte, anomaly PostScrapeHook) {
 	cfg = cfg.withDefaults()
 	go func() {
@@ -166,9 +180,10 @@ func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheIn
 
 		for {
 			now := time.Now().UTC()
-			nextRun := time.Date(now.Year(), now.Month(), now.Day(), 15, 30, 0, 0, time.UTC)
+			nextRun := time.Date(now.Year(), now.Month(), now.Day(),
+				scrapeHourUTC, scrapeMinuteUTC, 0, 0, time.UTC)
 
-			// If it's already past or exactly 15:30 UTC today, plan for tomorrow
+			// If it's already past or exactly the scrape time today, plan for tomorrow
 			if !nextRun.After(now) {
 				nextRun = nextRun.Add(24 * time.Hour)
 			}
