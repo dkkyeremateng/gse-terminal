@@ -108,6 +108,7 @@ type Service struct {
 	subscriber   string // mailto: contact for the push service
 	store        SubscriptionStore
 	dedupe       DigestDedupe
+	validator    *EndpointValidator
 	log          *slog.Logger
 }
 
@@ -120,9 +121,24 @@ func New(vapidPublic, vapidPrivate, subscriber string, store SubscriptionStore, 
 		vapidPrivate: vapidPrivate,
 		subscriber:   subscriber,
 		store:        store,
+		validator:    NewEndpointValidator(),
 		log:          log,
 	}
 }
+
+// SetEndpointValidator overrides the default push-service allowlist.
+// Used to widen it from configuration when a browser we have not
+// enumerated starts issuing endpoints from a new host.
+func (s *Service) SetEndpointValidator(v *EndpointValidator) {
+	if v != nil {
+		s.validator = v
+	}
+}
+
+// Validator exposes the configured allowlist so the HTTP layer can
+// reject a bad endpoint at subscribe time — with a real status code —
+// rather than silently dropping it here on a background goroutine.
+func (s *Service) Validator() *EndpointValidator { return s.validator }
 
 // SetDigestDedupe wires the per-(user, day) dedupe gate. Optional —
 // when unset, the bulk SendWatchListDigest path runs without dedupe
@@ -352,7 +368,6 @@ func formatPrice(p float64) string {
 	return fmt.Sprintf("%.2f", p)
 }
 
-
 func (s *Service) sendToUser(ctx context.Context, userID int, payload Payload) {
 	if s == nil || s.store == nil {
 		return
@@ -373,6 +388,18 @@ func (s *Service) sendToUser(ctx context.Context, userID int, payload Payload) {
 	}
 
 	for _, sub := range subs {
+		// Re-check on the way out. Subscribe-time validation is the
+		// primary gate, but rows predating it are already in the table
+		// and this is the last point before an outbound request is
+		// actually made — the place where a bad endpoint stops being a
+		// database row and becomes a request into whatever it names.
+		if s.validator != nil {
+			if err := s.validator.ValidateEndpoint(sub.Endpoint); err != nil {
+				s.log.Warn("push: refusing to send to disallowed endpoint",
+					"user_id", userID, "endpoint", truncate(sub.Endpoint, 60), "error", err)
+				continue
+			}
+		}
 		// SendNotificationWithContext binds the per-user 10s budget
 		// (set by SendWatchListDigest) to the actual webpush HTTP
 		// call — which is the dominant latency source. The

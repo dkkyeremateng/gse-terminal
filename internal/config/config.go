@@ -83,6 +83,16 @@ type Config struct {
 	VAPIDPublicKey  string
 	VAPIDPrivateKey string
 
+	// WebPushAllowedHosts overrides the allowlist of push-service hosts
+	// we are willing to send notifications to. The endpoint in a push
+	// subscription is a URL the server later POSTs to, so accepting an
+	// arbitrary one is a server-side request forgery hole — see
+	// internal/push/endpoint.go. Empty uses the built-in list covering
+	// Chrome, Firefox, Safari, and legacy Edge. Set it only to admit a
+	// browser whose push service isn't in that list; an entry beginning
+	// with "." matches that domain and its subdomains.
+	WebPushAllowedHosts []string
+
 	// TrustProxy makes the server read the client address from the
 	// X-Forwarded-For / X-Real-IP headers a reverse proxy sets. Required
 	// for correct per-client rate limiting behind Caddy/nginx, and unsafe
@@ -196,6 +206,7 @@ func Load() (*Config, error) {
 		AppBaseURL:          os.Getenv("APP_BASE_URL"),
 		VAPIDPublicKey:      os.Getenv("VAPID_PUBLIC_KEY"),
 		VAPIDPrivateKey:     os.Getenv("VAPID_PRIVATE_KEY"),
+		WebPushAllowedHosts: parseList(getEnv("WEBPUSH_ALLOWED_HOSTS", "")),
 		TrustProxy:          getEnvBool("TRUST_PROXY", false),
 		MetricsToken:        os.Getenv("METRICS_TOKEN"),
 		AllowedOrigins:      parseList(getEnv("ALLOWED_ORIGINS", "")),

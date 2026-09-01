@@ -18,6 +18,10 @@ import (
 type digestRunner interface {
 	SendWatchListDigest(ctx context.Context, snapshot map[string]push.SymbolSnap)
 	SendDigestToUser(ctx context.Context, userID int, watchlist []string, snapshot map[string]push.SymbolSnap)
+	// Validator exposes the push-service allowlist so the subscribe
+	// handler can reject a bad endpoint with a 400 instead of storing it
+	// and having the send path drop it later on a background goroutine.
+	Validator() *push.EndpointValidator
 }
 
 // SetDigestRunner wires the (optional) watchlist digest dispatcher. When
@@ -140,6 +144,30 @@ func (s *Server) HandleSubscribePush(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Endpoint == "" || body.Keys.P256dh == "" || body.Keys.Auth == "" {
 		respondError(w, http.StatusBadRequest, "endpoint, p256dh, and auth are required")
+		return
+	}
+
+	// The endpoint is a URL we will later POST to from inside the network.
+	// Unvalidated, it is a server-side request forgery primitive: any
+	// authenticated user could point it at the cloud metadata service or
+	// at QuestDB / Redis / Postgres on our own Docker network and have the
+	// server make the request for them. Only real push services are
+	// accepted; see internal/push/endpoint.go.
+	if s.digestRunner != nil {
+		if v := s.digestRunner.Validator(); v != nil {
+			if err := v.ValidateEndpoint(body.Endpoint); err != nil {
+				LoggerFromCtx(r.Context()).Warn("push subscribe rejected",
+					"user_id", user.ID, "error", err)
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	// Malformed crypto material would otherwise fail inside the
+	// encryption step on a background goroutine, where the user never
+	// learns their subscription is dead.
+	if err := push.ValidateKeys(body.Keys.P256dh, body.Keys.Auth); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
