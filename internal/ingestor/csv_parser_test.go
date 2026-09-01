@@ -151,3 +151,103 @@ func TestParseIntClean(t *testing.T) {
 		}
 	}
 }
+
+// The prefix list is a preference order. It used to be decorative: the
+// loops were nested header-outside, so the first header matching *any*
+// prefix won, and Go randomises map iteration.
+func TestGetIdxPrefix_HonoursPrecedence(t *testing.T) {
+	hm := map[string]int{
+		"lasttransactionprice": 7, // first prefix — must always win
+		"closeprice":           9, // third prefix
+	}
+	for i := 0; i < 2000; i++ {
+		idx, ok := getIdxPrefix(hm, "lasttransactionprice", "lastprice", "closeprice")
+		if !ok || idx != 7 {
+			t.Fatalf("iteration %d: got column %d (ok=%v), want 7", i, idx, ok)
+		}
+	}
+}
+
+// Two headers sharing one prefix must resolve the same way every time.
+func TestGetIdxPrefix_IsDeterministic(t *testing.T) {
+	hm := map[string]int{
+		"lastprice":         1,
+		"lastpricecurrency": 2,
+	}
+	seen := map[int]bool{}
+	for i := 0; i < 2000; i++ {
+		idx, _ := getIdxPrefix(hm, "lastprice")
+		seen[idx] = true
+	}
+	if len(seen) != 1 {
+		t.Errorf("same header set resolved to %d different columns: %v", len(seen), seen)
+	}
+	// The more specific header is the shorter one, and it is the one meant.
+	if !seen[1] {
+		t.Errorf("chose the longer header; want column 1 (lastprice)")
+	}
+}
+
+// Every column of the real GSE export still resolves to the right index.
+func TestGetIdxPrefix_ResolvesLiveExportHeaders(t *testing.T) {
+	headers := []string{
+		"Daily Date", "Share Code", "Year High (GH¢)", "Year Low (GH¢)",
+		"Previous Closing Price - VWAP (GH¢)", "Opening Price (GH¢)",
+		"Last Transaction Price (GH¢)", "Closing Price - VWAP (GH¢)",
+		"Price Change (GH¢)", "Closing Bid Price (GH¢)", "Closing Offer Price (GH¢)",
+		"Total Shares Traded", "Total Value Traded (GH¢)",
+	}
+	hm := map[string]int{}
+	for i, h := range headers {
+		hm[normalizeHeader(h)] = i
+	}
+	want := []struct {
+		col      int
+		prefixes []string
+	}{
+		{0, []string{"dailydate"}},
+		{1, []string{"sharecode", "symbol"}},
+		{2, []string{"yearhigh"}},
+		{3, []string{"yearlow"}},
+		{4, []string{"previousclosingprice"}},
+		{5, []string{"openingprice", "openprice"}},
+		{6, []string{"lasttransactionprice", "lastprice", "closeprice"}},
+		{7, []string{"closingpricevwap"}},
+		{8, []string{"pricechange"}},
+		{9, []string{"closingbidprice"}},
+		{10, []string{"closingofferprice"}},
+		{11, []string{"totalsharestraded", "volume"}},
+		{12, []string{"totalvaluetraded"}},
+	}
+	for _, tc := range want {
+		got, ok := getIdxPrefix(hm, tc.prefixes...)
+		if !ok || got != tc.col {
+			t.Errorf("getIdxPrefix(%v) = %d (ok=%v), want %d (%q)",
+				tc.prefixes, got, ok, tc.col, headers[tc.col])
+		}
+	}
+}
+
+// A symbol outside the ticker charset must be rejected, not stored — it
+// could never be queried, and it renders into an HTML response.
+func TestParseRecord_RejectsMalformedSymbol(t *testing.T) {
+	hm := map[string]int{"dailydate": 0, "sharecode": 1}
+	for _, sym := range []string{
+		`<script src="https://cdn.jsdelivr.net/npm/x"></script>`,
+		`" onfocus="alert(1)`,
+		"lowercase",
+		"-LEAD",
+		"TRAIL-",
+	} {
+		if _, err := parseRecord([]string{"01/09/2026", sym}, hm); err == nil {
+			t.Errorf("parseRecord accepted symbol %q", sym)
+		}
+	}
+	// The real separator-bearing tickers must survive, footnote asterisks
+	// and all.
+	for _, sym := range []string{"MTNGH", "SCB PREF", "GGBL RE", "SG-SSB", "**ALW**", "PBC**"} {
+		if _, err := parseRecord([]string{"01/09/2026", sym}, hm); err != nil {
+			t.Errorf("parseRecord rejected real symbol %q: %v", sym, err)
+		}
+	}
+}
