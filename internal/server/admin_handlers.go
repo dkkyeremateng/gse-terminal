@@ -100,7 +100,7 @@ func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Fan out the watchlist digest push so subscribed users get the
 	// fresh snapshot even when the data update came from an admin CSV
-	// upload outside the daily 15:30 UTC scrape window. Same dedupe
+	// upload outside the daily scheduled scrape window. Same dedupe
 	// tag as the scheduled scrape — multiple uploads on the same day
 	// replace rather than duplicate notifications.
 	if s.digestRunner != nil && s.qdbRepo != nil && res.Inserted > 0 {

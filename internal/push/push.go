@@ -91,7 +91,7 @@ type Payload struct {
 // DigestDedupe gates the daily watchlist digest fan-out so each
 // (user, trading-day) tuple receives at most one push, even when both
 // the post-upload trigger (admin CSV) and the post-scrape trigger
-// (15:30 UTC schedule) fire on the same day. Implemented by Redis:
+// (the daily schedule) fire on the same day. Implemented by Redis:
 // MarkDigestSent does an atomic SETNX with a ~30h TTL — returns true
 // the first time and false on every subsequent call within the
 // window. The service-worker tag also dedupes at the OS layer; this

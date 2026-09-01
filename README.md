@@ -8,7 +8,7 @@ with an embedded UI.
 ## What it does
 
 - **Daily ingest.** Pulls the exchange's own "Daily Shares & ETFs" table
-  from gse.com.gh at 15:30 UTC and writes it to QuestDB. The same CSV
+  from gse.com.gh at 16:30 UTC and writes it to QuestDB. The same CSV
   format can be uploaded by hand from the admin panel; both paths share one
   parser, so a backfill and a scheduled run behave identically.
 - **Market data.** OHLC history, symbol comparison, sector rotation, top
@@ -58,7 +58,7 @@ go run ./cmd/server
 The server listens on `:8080`. First boot creates an `admin` user and
 prints its password **once** — save it.
 
-There is no seed data. Either wait for the 15:30 UTC scrape, upload a CSV
+There is no seed data. Either wait for the 16:30 UTC scrape, upload a CSV
 from the admin panel, or fetch a date range directly:
 
 ```bash

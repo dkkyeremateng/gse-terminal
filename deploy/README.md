@@ -115,9 +115,46 @@ The Go binary and UI are baked into the image, so a rebuild is required for
 any code change — `restart` alone re-runs the old binary. Schema migrations
 run automatically at boot.
 
+### A Caddyfile change needs a recreate, not a reload
+
+`deploy/Caddyfile` is bind-mounted as a **single file**, and Docker binds a
+single-file mount by inode. `git pull` does not edit the file in place — it
+writes a new one and renames over the old — so after a pull the container is
+still holding the previous inode and cannot see the change:
+
+```
+host:      $ stat -c %i deploy/Caddyfile              # 2171473
+container: $ stat -c %i /etc/caddy/Caddyfile          # 2151100  <- stale
+```
+
+The trap is that everything still reports success. `caddy validate`,
+`caddy adapt` and `caddy reload` all run **inside** the container, so they
+read the stale file, find it valid, and exit 0 — while changing nothing.
+Nothing in the logs says otherwise; the only symptom is that the new
+directive is missing from the response.
+
+Recreate the container instead:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml \
+  up -d --force-recreate caddy
+```
+
+Certificates live in the `caddy_data` volume, so this costs about a second
+of downtime and does not re-request anything from Let's Encrypt.
+
+To confirm the container actually sees the file you edited:
+
+```bash
+docker compose ... exec caddy grep -c Strict-Transport /etc/caddy/Caddyfile
+```
+
+A directive you just added reading `0` there means the mount is stale, not
+that the config is wrong.
+
 ## Operational notes
 
-- **The daily scrape** runs at 15:30 UTC and drives a headless Chromium
+- **The daily scrape** runs at 16:30 UTC and drives a headless Chromium
   inside the app container. It needs the 2 GB limit; if the container is
   OOM-killed each afternoon, that's the cause.
 - **Health**: `/healthz` is liveness, `/readyz` checks Postgres, Redis, and
