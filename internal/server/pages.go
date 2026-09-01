@@ -121,26 +121,45 @@ func (s *Server) HandleManifest(w http.ResponseWriter, r *http.Request) {
 // so it works even when the runtime cache is empty.
 func (s *Server) HandleOfflinePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Revalidate rather than cache: the shell is what users see when the
+	// network is down, so serving a stale copy from a previous deploy is
+	// the one case where it matters most that it is current.
+	w.Header().Set("Cache-Control", "no-cache")
 	s.serveStaticFile(w, r, "offline.html")
 }
 
 // PWA install assets — icons + screenshots referenced from the manifest.
 // One handler per file so the route table stays explicit; serveStaticFile
 // already streams from disk in dev and from embed.FS in prod.
+//
+// These sit outside the /static/* group, so they do not inherit its
+// cache-control middleware and have to set their own. Icons and
+// screenshots are content-addressed by the manifest and change only on a
+// redeploy, so a day is right — but not `immutable`, which the static
+// group applies and which would stop a redeploy from ever refreshing them.
+func (s *Server) servePWAAsset(w http.ResponseWriter, r *http.Request, name string) {
+	if s.cfg.IsProduction() {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	}
+	s.serveStaticFile(w, r, name)
+}
+
 func (s *Server) HandlePWAIcon192(w http.ResponseWriter, r *http.Request) {
-	s.serveStaticFile(w, r, "icon-192.png")
+	s.servePWAAsset(w, r, "icon-192.png")
 }
 func (s *Server) HandlePWAIcon512(w http.ResponseWriter, r *http.Request) {
-	s.serveStaticFile(w, r, "icon-512.png")
+	s.servePWAAsset(w, r, "icon-512.png")
 }
 func (s *Server) HandlePWAIconMaskable(w http.ResponseWriter, r *http.Request) {
-	s.serveStaticFile(w, r, "icon-maskable.png")
+	s.servePWAAsset(w, r, "icon-maskable.png")
 }
 func (s *Server) HandlePWAScreenshotWide(w http.ResponseWriter, r *http.Request) {
-	s.serveStaticFile(w, r, "screenshot-wide.png")
+	s.servePWAAsset(w, r, "screenshot-wide.png")
 }
 func (s *Server) HandlePWAScreenshotMobile(w http.ResponseWriter, r *http.Request) {
-	s.serveStaticFile(w, r, "screenshot-mobile.png")
+	s.servePWAAsset(w, r, "screenshot-mobile.png")
 }
 
 // HandleSettingsPage serves the user self-service console at /settings.
