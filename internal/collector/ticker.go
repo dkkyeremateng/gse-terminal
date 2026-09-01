@@ -85,20 +85,119 @@ func (c ScraperConfig) withDefaults() ScraperConfig {
 	return c
 }
 
-var ghanaHolidays = map[string]string{
+// marketClosures lists dates the GSE is known not to have held a session.
+//
+// It is deliberately NOT the Ghana public-holiday calendar, because the two
+// are not the same list. Checked against the 165 sessions actually held in
+// 2026 up to 2026-09-01, the previous public-holiday table was wrong in both
+// directions:
+//
+//   - The market TRADED on Constitution Day (Jan 7), Africa Day (May 25) and
+//     Republic Day (Jul 1). Those were downgraded to commemorative days by
+//     the 2019 amendment to the Public Holidays Act and are not market
+//     closures. Listing them made the scheduler skip four real sessions a
+//     year for nothing.
+//   - The market was CLOSED on 2026-03-20, 2026-03-23 and 2026-05-27 (the
+//     Eid observances, which are lunar and shift every year), and on
+//     2026-01-09 and 2026-07-03, neither of which is a public holiday at
+//     all. None were listed.
+//
+// The entry for Founders' Day was also a day early: it read 2026-08-03, and
+// the market traded on both the 3rd and the actual holiday on the 4th.
+//
+// Dates through 2026-09-01 are observed — taken from which trading_dates
+// exist in QuestDB, which is authoritative because the backfill pulled every
+// session GSE published. Later dates are projected from the statutory
+// calendar and are best-effort: the Eid dates in particular are declared by
+// proclamation and cannot be known this far ahead, so this list WILL be
+// incomplete. That is by design; see the two use sites below.
+//
+// How wrongness here is absorbed:
+//
+//   - The scheduler no longer consults this list. A holiday simply means the
+//     scrape finds an empty export, retries inside its cutoff, and logs. One
+//     wasted Chrome launch on ~10 days a year is a far better trade than
+//     silently skipping a session the market did hold.
+//   - The freshness watchdog does consult it, because there a missing entry
+//     only produces a spurious "data is stale" alert. That is the safe
+//     direction to be wrong in.
+var marketClosures = map[string]string{
+	// ── 2026: observed (no session present in QuestDB) ──
 	"2026-01-01": "New Year's Day",
-	"2026-01-07": "Constitution Day",
+	"2026-01-09": "market closed (no session published)",
 	"2026-03-06": "Independence Day",
+	"2026-03-20": "Eid al-Fitr",
+	"2026-03-23": "Eid al-Fitr (observed)",
 	"2026-04-03": "Good Friday",
 	"2026-04-06": "Easter Monday",
 	"2026-05-01": "May Day",
-	"2026-05-25": "Africa Day",
-	"2026-07-01": "Republic Day",
-	"2026-08-03": "Founders' Day",
-	"2026-09-21": "Memorial Day",
+	"2026-05-27": "Eid al-Adha",
+	"2026-07-03": "market closed (no session published)",
+	// ── 2026: projected, not yet elapsed ──
+	"2026-09-21": "Kwame Nkrumah Memorial Day",
 	"2026-12-04": "Farmers' Day",
 	"2026-12-25": "Christmas Day",
 	"2026-12-26": "Boxing Day",
+
+	// ── 2027: projected from the statutory calendar ──
+	"2027-01-01": "New Year's Day",
+	"2027-03-08": "Independence Day (observed, 6th is a Saturday)",
+	"2027-03-26": "Good Friday",
+	"2027-03-29": "Easter Monday",
+	"2027-05-03": "May Day (observed, 1st is a Saturday)",
+	"2027-08-04": "Founders' Day",
+	"2027-09-21": "Kwame Nkrumah Memorial Day",
+	"2027-12-03": "Farmers' Day",
+	"2027-12-27": "Christmas Day (observed, 25th is a Saturday)",
+	"2027-12-28": "Boxing Day (observed, 26th is a Sunday)",
+
+	// ── 2028: projected from the statutory calendar ──
+	"2028-01-03": "New Year's Day (observed, 1st is a Saturday)",
+	"2028-03-06": "Independence Day",
+	"2028-04-14": "Good Friday",
+	"2028-04-17": "Easter Monday",
+	"2028-05-01": "May Day",
+	"2028-08-04": "Founders' Day",
+	"2028-09-21": "Kwame Nkrumah Memorial Day",
+	"2028-12-01": "Farmers' Day",
+	"2028-12-25": "Christmas Day",
+	"2028-12-26": "Boxing Day",
+}
+
+// closureCalendarThrough is the last date marketClosures makes any claim
+// about. Past it the map is empty, every holiday reads as a trading day, and
+// the freshness watchdog starts crying wolf on real closures.
+//
+// The previous table ran out at 2026-12-31 with nothing to say so. Rather
+// than move that cliff quietly, checkClosureCalendar warns while there is
+// still time to extend it — a hard-coded calendar with no expiry warning is
+// how this rots in the first place.
+var closureCalendarThrough = time.Date(2028, 12, 31, 0, 0, 0, 0, time.UTC)
+
+// closureCalendarWarnWithin is how far ahead of the horizon to start
+// complaining. A quarter is enough notice to look up the next year's gazette
+// without it becoming background noise.
+const closureCalendarWarnWithin = 90 * 24 * time.Hour
+
+// isMarketClosure reports whether the date is a known non-trading day.
+func isMarketClosure(t time.Time) (string, bool) {
+	name, ok := marketClosures[t.Format("2006-01-02")]
+	return name, ok
+}
+
+// checkClosureCalendar logs when the closure calendar is close to, or past,
+// the last date it covers. Called at startup and from the freshness
+// watchdog, so an unattended deployment surfaces it either way.
+func checkClosureCalendar(now time.Time, logger *slog.Logger) {
+	switch {
+	case now.After(closureCalendarThrough):
+		logger.Error("Market closure calendar has expired; every holiday now reads as a trading day and the freshness watchdog will report false staleness",
+			"coveredThrough", closureCalendarThrough.Format("2006-01-02"))
+	case now.Add(closureCalendarWarnWithin).After(closureCalendarThrough):
+		logger.Warn("Market closure calendar expires soon; extend marketClosures in internal/collector/ticker.go",
+			"coveredThrough", closureCalendarThrough.Format("2006-01-02"),
+			"daysRemaining", int(closureCalendarThrough.Sub(now).Hours()/24))
+	}
 }
 
 // CacheInvalidator is the narrow interface the collector needs to wipe the
@@ -183,6 +282,8 @@ func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheIn
 			"script", cfg.ScriptPath,
 			"schedule", fmt.Sprintf("%02d:%02d UTC daily", scrapeHourUTC, scrapeMinuteUTC))
 
+		checkClosureCalendar(time.Now().UTC(), logger)
+
 		go watchDataFreshness(ctx, qdb, auditLog)
 
 		// Seed scrape on boot, but only when the newest trading day we
@@ -207,21 +308,29 @@ func StartDaemon(ctx context.Context, qdb *repository.QuestDBRepo, cache CacheIn
 				nextRun = nextRun.Add(24 * time.Hour)
 			}
 
-			// Ensure the target day is a weekday (Monday-Friday) and not a holiday
-			for {
-				if nextRun.Weekday() == time.Saturday || nextRun.Weekday() == time.Sunday {
-					nextRun = nextRun.Add(24 * time.Hour)
-					continue
-				}
-
-				dateStr := nextRun.Format("2006-01-02")
-				if holidayName, isHoliday := ghanaHolidays[dateStr]; isHoliday {
-					logger.Info("Skipping scheduled scrape (holiday)", "date", dateStr, "holiday", holidayName)
-					nextRun = nextRun.Add(24 * time.Hour)
-					continue
-				}
-
-				break
+			// Advance to the next weekday. Weekends are the only skip we
+			// make: the GSE has never held a Saturday session, so that
+			// cannot cost us data.
+			//
+			// The closure calendar is deliberately NOT consulted here. It
+			// used to be, and it was wrong in the expensive direction —
+			// Constitution Day, Africa Day, Republic Day and a
+			// day-early Founders' Day were all listed, and the market
+			// traded on every one of them, so the scheduler skipped four
+			// real sessions a year and nothing said so. Running the scrape
+			// on an actual holiday costs one Chrome launch; the export
+			// comes back empty, scrapeWithRetry retries inside its cutoff
+			// and gives up with a log. That is the cheap direction to be
+			// wrong in.
+			for nextRun.Weekday() == time.Saturday || nextRun.Weekday() == time.Sunday {
+				nextRun = nextRun.Add(24 * time.Hour)
+			}
+			if name, closed := isMarketClosure(nextRun); closed {
+				// Advisory only — we still run. Worth logging so an empty
+				// export on this date reads as expected rather than as a
+				// scraper fault.
+				logger.Info("Next scheduled scrape falls on a known market closure; running anyway",
+					"date", nextRun.Format("2006-01-02"), "closure", name)
 			}
 
 			duration := nextRun.Sub(now)
@@ -417,6 +526,7 @@ func watchDataFreshness(ctx context.Context, qdb *repository.QuestDBRepo, auditL
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			checkClosureCalendar(time.Now().UTC(), logger)
 			latest, err := qdb.GetLastIngestionTime(ctx)
 			if err != nil {
 				logger.Warn("Freshness check could not read the latest trading date", "error", err)
@@ -442,10 +552,16 @@ func watchDataFreshness(ctx context.Context, qdb *repository.QuestDBRepo, auditL
 	}
 }
 
-// tradingDaysBetween counts weekday, non-holiday days after `from` up to and
-// including `to`. Weekends and Ghana public holidays are not missing data, so
+// tradingDaysBetween counts weekday, non-closure days after `from` up to and
+// including `to`. Weekends and known market closures are not missing data, so
 // they must not count towards staleness -- otherwise every Monday would look
 // like a two-day outage.
+//
+// This is the safe place for the closure calendar to be incomplete: a
+// closure we do not know about inflates the count and can produce a
+// spurious stale alert, which someone then investigates. The scheduler
+// deliberately does not use it, because there being wrong loses a session
+// silently.
 func tradingDaysBetween(from, to time.Time) int {
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
 	to = time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
@@ -455,7 +571,7 @@ func tradingDaysBetween(from, to time.Time) int {
 		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
 			continue
 		}
-		if _, isHoliday := ghanaHolidays[d.Format("2006-01-02")]; isHoliday {
+		if _, closed := isMarketClosure(d); closed {
 			continue
 		}
 		n++
@@ -584,7 +700,7 @@ func getLastTradingDate(t time.Time) time.Time {
 			continue
 		}
 
-		if _, isHoliday := ghanaHolidays[date.Format("2006-01-02")]; isHoliday {
+		if _, closed := isMarketClosure(date); closed {
 			date = date.AddDate(0, 0, -1)
 			continue
 		}
