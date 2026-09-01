@@ -706,28 +706,20 @@ func main() {
 
 		r.Handle("/static/*", http.StripPrefix("/static/", fileServer))
 
-		// PWA files have to live at the origin root. A service worker's
-		// scope can't reach above its own URL, and ui/src/util/sw.js
-		// registers /sw.js with scope "/" so routes like /terminal and
-		// /v1 pass through it — served from /static/ it could only ever
-		// control /static/*. The manifest, offline shell, and the icons
-		// its install banner references are root-relative for the same
-		// reason (see PRECACHE_URLS in ui/dist/sw.js).
-		for _, name := range []string{
-			"/favicon.png", "/manifest.webmanifest", "/offline.html",
-			"/icon-192.png", "/icon-512.png", "/icon-maskable.png",
-		} {
-			r.Get(name, func(w http.ResponseWriter, r *http.Request) {
-				fileServer.ServeHTTP(w, r)
-			})
-		}
-		r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
-			// Lets the script claim the whole origin even if it ever moves
-			// off the root, which is what ui/src/util/sw.js documents.
-			w.Header().Set("Service-Worker-Allowed", "/")
-			// Never hand back a day-old worker: the group's production
-			// cache header would pin an outdated SW on returning visitors.
-			w.Header().Set("Cache-Control", "no-cache")
+		// The PWA files that have to live at the origin root are NOT
+		// registered here. They used to be, and because chi silently
+		// overwrites a duplicate method+pattern rather than panicking, the
+		// registrations in this group won and the dedicated handlers above
+		// (srv.HandleServiceWorker, HandleManifest, HandleOfflinePage,
+		// HandlePWAIcon*) became unreachable code. The visible symptom was
+		// /manifest.webmanifest going out as text/plain — HandleManifest
+		// sets application/manifest+json, but it was never called — and
+		// the offline shell inheriting this group's immutable day-long
+		// cache, so a redeploy could not refresh it.
+		//
+		// /favicon.png stays because it has no dedicated handler; it is
+		// the one root asset this group is genuinely responsible for.
+		r.Get("/favicon.png", func(w http.ResponseWriter, r *http.Request) {
 			fileServer.ServeHTTP(w, r)
 		})
 	})
