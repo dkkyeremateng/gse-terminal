@@ -101,16 +101,21 @@ type refreshValue struct {
 	UserID   int    `json:"uid"`
 	Username string `json:"u"`
 	Role     string `json:"r"`
+	// Epoch is the session epoch current when this token was issued.
+	// silentRefresh refuses the token when it no longer matches, which
+	// is how a role change or a deletion invalidates a refresh cookie
+	// that would otherwise keep minting fresh access JWTs for 90 days.
+	Epoch int `json:"e"`
 }
 
 // StoreRefreshToken writes the token → (userID, username, role) record
 // with a TTL matching the cookie's MaxAge. Identity is stashed alongside
 // the user id so silent refresh never touches Postgres.
-func (r *RedisRepo) StoreRefreshToken(ctx context.Context, token string, userID int, username, role string, ttl time.Duration) error {
+func (r *RedisRepo) StoreRefreshToken(ctx context.Context, token string, userID int, username, role string, epoch int, ttl time.Duration) error {
 	if ttl <= 0 {
 		return errors.New("refresh ttl must be positive")
 	}
-	payload, err := json.Marshal(refreshValue{UserID: userID, Username: username, Role: role})
+	payload, err := json.Marshal(refreshValue{UserID: userID, Username: username, Role: role, Epoch: epoch})
 	if err != nil {
 		return err
 	}
@@ -124,21 +129,24 @@ func (r *RedisRepo) StoreRefreshToken(ctx context.Context, token string, userID 
 // ids) are still decoded — userID is populated, username/role are
 // empty. The auth middleware treats those as force-re-login so the
 // next logged-in session transparently upgrades to the new format.
-func (r *RedisRepo) LookupRefreshToken(ctx context.Context, token string) (int, string, string, error) {
+func (r *RedisRepo) LookupRefreshToken(ctx context.Context, token string) (int, string, string, int, error) {
 	val, err := r.client.Get(ctx, refreshKey(token)).Bytes()
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", "", 0, err
 	}
 	var v refreshValue
 	if jsonErr := json.Unmarshal(val, &v); jsonErr == nil && v.UserID > 0 {
-		return v.UserID, v.Username, v.Role, nil
+		// Tokens written before the epoch field existed decode with
+		// Epoch 0, which matches an unbumped user — correct, and they
+		// are re-stamped on the owner's next login.
+		return v.UserID, v.Username, v.Role, v.Epoch, nil
 	}
 	// Legacy plain-int format — caller will treat empty identity as
 	// a signal to force re-auth.
 	if id, convErr := strconv.Atoi(string(val)); convErr == nil {
-		return id, "", "", nil
+		return id, "", "", 0, nil
 	}
-	return 0, "", "", errors.New("malformed refresh token value")
+	return 0, "", "", 0, errors.New("malformed refresh token value")
 }
 
 // TouchRefreshToken extends the token's TTL without changing its
@@ -202,6 +210,86 @@ func (r *RedisRepo) IsUserLocked(ctx context.Context, userID int) (bool, error) 
 		return false, err
 	}
 	return n > 0, nil
+}
+
+// ── Session epoch ─────────────────────────────────────────────────────
+
+// sessionEpochKey holds a monotonically increasing counter per user.
+// Every credential we mint — the access JWT (as the `sess` claim) and
+// the refresh-token record — carries the epoch that was current when
+// it was issued. Anything presenting a stale epoch is refused.
+//
+// This is what makes privilege revocation actually take effect. The
+// lock sentinel above can only block the silent-refresh path, so a
+// locked user keeps their current access JWT until it expires. The
+// epoch is checked on EVERY authenticated request, so bumping it
+// invalidates outstanding access tokens as well — which is what a
+// role demotion or an account deletion needs.
+//
+// Deliberately persistent (no TTL). If the key expired, every session
+// issued under a non-zero epoch would read the current epoch back as
+// 0, mismatch, and force a re-login. The keyspace is bounded by the
+// number of users who have ever been demoted, locked, or deleted —
+// a handful of integers, not something worth expiring.
+func sessionEpochKey(userID int) string {
+	return "auth:session_epoch:" + strconv.Itoa(userID)
+}
+
+// BumpSessionEpoch invalidates every outstanding session for userID —
+// access JWTs and refresh tokens alike — and returns the new epoch.
+// Call it from any path that changes what a session is allowed to do:
+// role change, lock, delete.
+func (r *RedisRepo) BumpSessionEpoch(ctx context.Context, userID int) (int, error) {
+	n, err := r.client.Incr(ctx, sessionEpochKey(userID)).Result()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+// SessionEpoch returns the current epoch for userID, or 0 when the user
+// has never had one bumped. Read at login so the issued credentials are
+// stamped with it.
+//
+// Soft-fails to 0 on a Redis error rather than propagating: a blip at
+// login time should not block the login. The worst case is a session
+// stamped with epoch 0 that gets refused on its first request once
+// Redis recovers — annoying, not insecure.
+func (r *RedisRepo) SessionEpoch(ctx context.Context, userID int) (int, error) {
+	n, err := r.client.Get(ctx, sessionEpochKey(userID)).Int()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// CheckSession answers both hot-path session questions in a single
+// round trip: is this jti revoked, and what is the user's current
+// epoch. The auth middleware runs this on every authenticated request,
+// so folding the two lookups into one pipeline keeps the added epoch
+// check off the latency budget — it costs no extra RTT over the
+// revocation lookup that was already there.
+func (r *RedisRepo) CheckSession(ctx context.Context, jti string, userID int) (bool, int, error) {
+	pipe := r.client.Pipeline()
+	revoked := pipe.Exists(ctx, "auth:revoked:"+jti)
+	epoch := pipe.Get(ctx, sessionEpochKey(userID))
+	// Exec reports redis.Nil when any command in the pipeline returned a
+	// nil reply. That is the normal case here (an unbumped user has no
+	// epoch key), so it is not an error — the per-command results below
+	// are still populated.
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return false, 0, err
+	}
+	n, err := epoch.Int()
+	if err == redis.Nil {
+		n = 0
+	} else if err != nil {
+		return false, 0, err
+	}
+	return revoked.Val() > 0, n, nil
 }
 
 // MarkDigestSent records that a daily watchlist digest has been
