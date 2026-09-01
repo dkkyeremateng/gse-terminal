@@ -356,6 +356,28 @@ func main() {
 		httprate.WithKeyFuncs(keyByUserOrIP),
 	)
 
+	// Endpoints that verify a password. These sit behind RequireAuth, so
+	// they were only covered by the global 300/min budget — which made
+	// POST /v1/me/merge-account a password-guessing oracle: it bcrypt-
+	// checks an arbitrary username + password and returns distinguishable
+	// statuses, at 300 attempts a minute, entirely outside the 5/min
+	// limiter guarding /login.
+	//
+	// Two limiters rather than one. Keyed per-user alone, an attacker just
+	// registers more accounts to get more buckets; keyed per-IP alone,
+	// one office NAT shares a bucket. Both must pass, so neither dodge
+	// works. The per-IP ceiling is the looser of the two so genuine
+	// shared egress isn't punished for one user's typos.
+	credentialLimiter := newCredentialLimiter(keyByUserOrIP)
+
+	// Outgoing-email trigger. The destination address is supplied by the
+	// caller, so without a cap this is an email cannon pointed at any
+	// address of the attacker's choosing, sending branded mail from our
+	// SMTP domain — a deliverability and blocklist problem long before
+	// it's a victim's problem. Three an hour is well clear of a user
+	// who mistypes their address a couple of times.
+	emailSendLimiter := newEmailSendLimiter(keyByUserOrIP)
+
 	// Liveness: process is up. Used by k8s livenessProbe.
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -507,8 +529,8 @@ func main() {
 
 		r.Get("/v1/me/linked-providers", srv.HandleGetLinkedProviders)
 		r.Post("/v1/me/unlink-provider", srv.HandleUnlinkProvider)
-		r.Post("/v1/me/set-password", srv.HandleSetPassword)
-		r.Post("/v1/me/merge-account", srv.HandleMergeAccount)
+		r.With(credentialLimiter).Post("/v1/me/set-password", srv.HandleSetPassword)
+		r.With(credentialLimiter).Post("/v1/me/merge-account", srv.HandleMergeAccount)
 		r.Get("/v1/watchlist", srv.HandleGetWatchList)
 		r.Post("/v1/watchlist", srv.HandleToggleWatchList)
 		// API key management — every authenticated user manages their own keys
@@ -533,7 +555,7 @@ func main() {
 		// upgrades shouldn't have to re-verify. The write endpoint only
 		// starts the flow; consumption happens at the public
 		// /auth/verify-email GET above.
-		r.Post("/v1/me/email/request-verify", srv.HandleRequestEmailVerification)
+		r.With(emailSendLimiter).Post("/v1/me/email/request-verify", srv.HandleRequestEmailVerification)
 
 		// Account management — self-service unlink-email + change-password.
 		// Both gated by AuthMiddleware only (any authenticated tier).
@@ -542,7 +564,7 @@ func main() {
 		// refuses for OAuth-only users without a password (they should use
 		// /v1/me/set-password instead).
 		r.Post("/v1/me/email/unlink", srv.HandleUnlinkEmail)
-		r.Post("/v1/me/password", srv.HandleChangePassword)
+		r.With(credentialLimiter).Post("/v1/me/password", srv.HandleChangePassword)
 
 		// Pro-role request flow. A standard user submits a request via
 		// POST /v1/me/pro-request; an admin decides it from the admin
@@ -930,6 +952,51 @@ func generateSecurePassword(length int) string {
 		os.Exit(1)
 	}
 	return hex.EncodeToString(b)[:length]
+}
+
+// Rate-limit budgets for the authenticated credential + outgoing-email
+// endpoints. Named constants so the test can assert against the same
+// numbers the router installs.
+const (
+	credentialPerUserPerMin = 5
+	credentialPerIPPerMin   = 20
+	emailSendPerUserPerHour = 3
+	emailSendPerIPPerHour   = 10
+)
+
+// newCredentialLimiter caps endpoints that verify a password.
+//
+// These sit behind RequireAuth, so they were only covered by the global
+// 300/min budget — which made POST /v1/me/merge-account a password-guessing
+// oracle: it bcrypt-checks an arbitrary username + password and returns
+// distinguishable statuses, at 300 attempts a minute, entirely outside the
+// 5/min limiter guarding /login.
+//
+// Two limiters rather than one. Keyed per-user alone, an attacker just
+// registers more accounts to get more buckets; keyed per-IP alone, one
+// office NAT shares a bucket between unrelated people. Both must pass, so
+// neither dodge works. The per-IP ceiling is the looser of the two so
+// genuine shared egress isn't punished for one user's typos.
+func newCredentialLimiter(keyFn httprate.KeyFunc) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		perUser := httprate.Limit(credentialPerUserPerMin, 1*time.Minute, httprate.WithKeyFuncs(keyFn))
+		return httprate.LimitByIP(credentialPerIPPerMin, 1*time.Minute)(perUser(next))
+	}
+}
+
+// newEmailSendLimiter caps the endpoint that triggers outgoing mail.
+//
+// The destination address is supplied by the caller, so without a cap this
+// is an email cannon pointed at any address of the attacker's choosing,
+// sending branded mail from our SMTP domain — a deliverability and
+// blocklist problem long before it is the recipient's problem. Three an
+// hour is well clear of a user who mistypes their address a couple of
+// times.
+func newEmailSendLimiter(keyFn httprate.KeyFunc) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		perUser := httprate.Limit(emailSendPerUserPerHour, 1*time.Hour, httprate.WithKeyFuncs(keyFn))
+		return httprate.LimitByIP(emailSendPerIPPerHour, 1*time.Hour)(perUser(next))
+	}
 }
 
 // requireBearerToken gates a handler behind `Authorization: Bearer <token>`.
