@@ -29,6 +29,12 @@ func validateInterval(interval string) error {
 	return nil
 }
 
+// ValidInterval exposes the allowlist to the HTTP layer so a handler can
+// reject a bad interval before it is interpolated into a cache key. The
+// query layer rejects it either way, but only after the caller-controlled
+// string has already been used to build a Redis key.
+func ValidInterval(interval string) bool { return validIntervals[interval] }
+
 type QuestDBRepo struct {
 	ilpSender qdb.LineSender
 	queryPool *pgxpool.Pool

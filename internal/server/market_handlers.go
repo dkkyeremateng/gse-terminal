@@ -96,6 +96,13 @@ func (s *Server) HandleGetHistory(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid symbol")
 		return
 	}
+	// The interval is interpolated into the cache key below, so check it
+	// here rather than relying on GetOHLC to reject it -- by then the
+	// caller-controlled string has already been used to build a Redis key.
+	if !repository.ValidInterval(interval) {
+		respondError(w, http.StatusBadRequest, "Invalid interval")
+		return
+	}
 
 	key := fmt.Sprintf("gse:data:history:%s:%s", symbol, interval)
 	bytes, err := s.cachedJSONBytes(r.Context(), key, func() (interface{}, error) {
@@ -143,6 +150,10 @@ func (s *Server) HandleGetCompare(w http.ResponseWriter, r *http.Request) {
 	interval := r.URL.Query().Get("interval")
 	if interval == "" {
 		interval = "1d"
+	}
+	if !repository.ValidInterval(interval) {
+		respondError(w, http.StatusBadRequest, "Invalid interval")
+		return
 	}
 	if symbolsParam == "" {
 		respondError(w, http.StatusBadRequest, "Missing symbols")
@@ -669,9 +680,16 @@ func (s *Server) buildMarketOverview(ctx context.Context) (*repository.MarketOve
 
 // HandleExportStockData handles the CSV export for a given symbol.
 func (s *Server) HandleExportStockData(w http.ResponseWriter, r *http.Request) {
-	symbol := chi.URLParam(r, "symbol")
+	symbol := strings.ToUpper(strings.TrimSpace(chi.URLParam(r, "symbol")))
 	if symbol == "" {
 		http.Error(w, "Symbol required", http.StatusNotFound)
+		return
+	}
+	// This was the one symbol-taking handler that skipped validation, which
+	// let an arbitrary caller-controlled string become a Redis key
+	// (gse:data:ticks:<anything>, cached for 6h) and a QuestDB scan.
+	if !validateSymbol(symbol) {
+		respondError(w, http.StatusBadRequest, "Invalid symbol")
 		return
 	}
 
@@ -694,7 +712,11 @@ func (s *Server) HandleExportStockData(w http.ResponseWriter, r *http.Request) {
 
 	filename := fmt.Sprintf("%s_historical_data_%s.csv", symbol, time.Now().Format("2006-01-02"))
 	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	// Quote the filename. Several real GSE tickers contain a space --
+	// "SCB PREF", "CAL PREF", "GGBL RE" -- and an unquoted
+	// Content-Disposition parameter ends at the first space, so browsers
+	// were saving those exports as "SCB" with no extension.
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
