@@ -140,7 +140,7 @@ spec:
             memory: "512Mi"
           limits:
             cpu: "1"
-            # Headroom for the headless Chromium the 15:30 UTC scrape spawns
+            # Headroom for the headless Chromium the 16:30 UTC scrape spawns
             # in-process. Steady-state usage is well under the old 1Gi; the
             # limit only has to survive the daily browser run.
             memory: "2Gi"

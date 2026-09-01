@@ -31,7 +31,7 @@ func (s *Server) SetDigestRunner(r digestRunner) { s.digestRunner = r }
 
 // dispatchUploadDigest pulls the latest QuestDB market snapshot and fires
 // a watchlist digest fan-out — the same notification users get after the
-// daily 15:30 UTC scrape, but triggered when an admin CSV upload changes
+// daily scheduled scrape, but triggered when an admin CSV upload changes
 // the underlying data outside the scheduled run. Invoked from HandleUpload
 // via goBackground so a slow Web Push provider can't hold the upload
 // response. Bounded by a 90s timeout on top of the parent bgCtx, mirroring
@@ -227,7 +227,7 @@ func (s *Server) HandleVAPIDPublicKey(w http.ResponseWriter, r *http.Request) {
 
 // HandleAdminTestDigest fires a watchlist digest push so admins can
 // validate the post-scrape pipeline end-to-end without waiting for
-// 15:30 UTC. Pulls the live QuestDB snapshot, then either:
+// the scheduled run. Pulls the live QuestDB snapshot, then either:
 //
 //   - default: sends only to the calling admin (safe — `?all=true` is
 //     opt-in to avoid accidentally spamming every subscribed user)
