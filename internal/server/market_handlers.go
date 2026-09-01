@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	htmlpkg "html"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,11 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"regexp"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/teckdroids/ges-data-engine/internal/analysis"
+	"github.com/teckdroids/ges-data-engine/internal/ingestor"
 	"github.com/teckdroids/ges-data-engine/internal/repository"
 )
 
@@ -57,6 +57,13 @@ func rankMovers(items []repository.MarketSummaryItem, minVolume int64) (gainers,
 	return gainers, losers
 }
 
+// symbolDoc describes the ticker rule; the rule itself lives in
+// internal/ingestor so there is exactly one definition of it. Keeping them
+// in sync by hand was an invitation to drift: a symbol the parser stores
+// but the handler rejects is a row nothing can query.
+//
+// The original note is preserved below because the reasoning still applies.
+//
 // symbolRe validates that a ticker symbol starts with an uppercase letter
 // and continues with uppercase letters or digits, optionally in
 // space- or hyphen-separated groups. GSE tickers are alphabetic-prefixed
@@ -73,15 +80,8 @@ func rankMovers(items []repository.MarketSummaryItem, minVolume int64) (gainers,
 // them at the handler, so 4,458 rows of real history could not be
 // queried at all. A separator must sit between two alphanumeric runs, so
 // leading, trailing and repeated separators are still rejected.
-var symbolRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:[ -][A-Z0-9]+)*$`)
-
-// symbolMaxLen bounds the whole symbol. The longest real GSE ticker is
-// well under this; the cap only stops an unbounded string reaching the
-// query layer.
-const symbolMaxLen = 16
-
 func validateSymbol(sym string) bool {
-	return len(sym) <= symbolMaxLen && symbolRe.MatchString(sym)
+	return ingestor.ValidSymbol(sym)
 }
 
 func (s *Server) HandleGetHistory(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +371,13 @@ func (s *Server) HandleGetSymbolsHTML(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	for _, sym := range symbols {
-		fmt.Fprintf(w, "<option value=\"%s\"></option>\n", sym)
+		// Symbols reach here from the CSV ingest, which does not constrain
+		// their charset -- it only strips footnote asterisks and rejects
+		// empty. Unescaped, a crafted upload plants markup that this public
+		// endpoint then serves to every visitor. The CSP blocks inline
+		// handlers but permits script-src from jsdelivr, unpkg and cdnjs,
+		// so an injected <script src> from one of those would run.
+		fmt.Fprintf(w, "<option value=%q></option>\n", htmlpkg.EscapeString(sym))
 	}
 }
 
