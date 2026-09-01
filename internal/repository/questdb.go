@@ -242,7 +242,13 @@ func (r *QuestDBRepo) GetOHLC(ctx context.Context, symbol, interval string) ([]O
 			last(close_price_vwap) as close,
 			sum(total_volume) as volume
 		FROM equities
-		WHERE symbol = $1
+		-- A zero close is "no price published", not a price of zero: days a
+		-- symbol did not trade, and partial rows the live scraper writes
+		-- (it supplies only last_price/price_change/total_volume, leaving
+		-- close_price_vwap at zero). Included, they drag min() to zero and
+		-- draw the series down to the axis. Excluding them gaps the bar
+		-- instead, matching GetRecentCloses and GetDailyClosesAllSymbols.
+		WHERE symbol = $1 AND close_price_vwap > 0
 		SAMPLE BY %s ALIGN TO CALENDAR
 		ORDER BY trading_date ASC;
 	`, interval)
@@ -318,7 +324,9 @@ func (r *QuestDBRepo) GetOHLCBatch(ctx context.Context, symbols []string, interv
 			last(close_price_vwap) as close,
 			sum(total_volume) as volume
 		FROM equities
-		WHERE symbol IN (%s)%s
+		-- See GetOHLC: a zero close means no published price, and would
+		-- otherwise sink both min() and the rendered line.
+		WHERE symbol IN (%s) AND close_price_vwap > 0%s
 		SAMPLE BY %s ALIGN TO CALENDAR
 		ORDER BY symbol, trading_date ASC;
 	`, strings.Join(placeholders[:len(symbols)], ","), dateFilter, interval)
@@ -376,8 +384,8 @@ type MarketSummaryItem struct {
 	Volume        int64   `json:"volume"`
 	BidPrice      float64 `json:"bidPrice"`
 	OfferPrice    float64 `json:"offerPrice"`
-	Spread        float64 `json:"spread"`       // offerPrice - bidPrice
-	SpreadPct     float64 `json:"spreadPct"`     // spread / midPrice * 100
+	Spread        float64 `json:"spread"`    // offerPrice - bidPrice
+	SpreadPct     float64 `json:"spreadPct"` // spread / midPrice * 100
 }
 
 type MarketOverview struct {
