@@ -112,7 +112,16 @@ func parseRecord(record []string, headerMap map[string]int) (repository.Tick, er
 	}
 
 	if idx, ok := getIdxPrefix(headerMap, "sharecode", "symbol"); ok {
-		t.Symbol = strings.TrimSpace(record[idx])
+		// GSE footnote markers ride along inside the symbol field
+		// ("**ALW**", "PBC**"). Kept verbatim they become a second,
+		// phantom series sitting alongside the real one, splitting a
+		// symbol's history in two. Preference lines and rights issues
+		// ("SCB PREF", "GGBL RE") are genuinely distinct instruments and
+		// are deliberately left alone.
+		t.Symbol = strings.TrimSpace(strings.ReplaceAll(record[idx], "*", ""))
+		if t.Symbol == "" {
+			return t, fmt.Errorf("empty symbol") // Required
+		}
 	} else {
 		return t, fmt.Errorf("no symbol column found") // Required
 	}
@@ -196,6 +205,14 @@ func parseFloatClean(s string) float64 {
 }
 
 func parseIntClean(s string) int64 {
+	// Truncate at the decimal separator before stripping punctuation. GSE
+	// writes volume as a bare integer in the live export ("1234") but with
+	// four decimal places in its historical files ("1234.0000"). Stripping
+	// the '.' along with the thousands separators would fold the fractional
+	// digits into the integer and multiply the value by 10^4.
+	if idx := strings.IndexByte(s, '.'); idx >= 0 {
+		s = s[:idx]
+	}
 	var sb strings.Builder
 	for _, r := range s {
 		if (r >= '0' && r <= '9') || r == '-' {
