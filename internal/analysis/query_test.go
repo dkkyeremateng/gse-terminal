@@ -255,3 +255,125 @@ func TestRepairPromptKeepsSectorList(t *testing.T) {
 		t.Error("repair prompt dropped the sector list")
 	}
 }
+
+// The prompt says equities is the only readable table, but the user's
+// question is appended to that prompt with no delimiter, so a prompt
+// injection can ask for anything. Saying so is not enforcing it.
+func TestValidateSQL_RejectsOtherTables(t *testing.T) {
+	cases := []string{
+		"SELECT * FROM tables() WHERE 1=1",
+		"SELECT * FROM sys.tables WHERE 1=1",
+		"SELECT * FROM users WHERE id = 1",
+		"SELECT a.symbol FROM equities a JOIN secrets b ON a.symbol = b.symbol WHERE a.symbol = 'MTNGH'",
+		"SELECT * FROM telemetry WHERE 1=1",
+	}
+	for _, sql := range cases {
+		if err := validateSQL(sql); err == nil {
+			t.Errorf("validateSQL(%q) = nil, want rejection", sql)
+		}
+	}
+}
+
+func TestValidateSQL_AllowsEquitiesAndCTEs(t *testing.T) {
+	cases := []string{
+		"SELECT symbol FROM equities WHERE symbol = 'MTNGH' LIMIT 10",
+		"SELECT a.symbol FROM equities a JOIN equities b ON a.symbol = b.symbol WHERE a.symbol = 'GCB' LIMIT 5",
+		"WITH recent AS (SELECT symbol, close_price_vwap FROM equities WHERE trading_date > '2026-01-01') SELECT symbol FROM recent WHERE close_price_vwap > 1 LIMIT 20",
+		"WITH a AS (SELECT symbol FROM equities WHERE symbol = 'X'), b AS (SELECT symbol FROM equities WHERE symbol = 'Y') SELECT * FROM a JOIN b ON a.symbol = b.symbol WHERE 1=1 LIMIT 5",
+	}
+	for _, sql := range cases {
+		if err := validateSQL(sql); err != nil {
+			t.Errorf("validateSQL(%q) = %v, want accepted", sql, err)
+		}
+	}
+}
+
+// A comment lets the keyword check read one thing and the engine another.
+func TestValidateSQL_RejectsComments(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT symbol FROM equities WHERE 1=1 -- DROP TABLE equities",
+		"SELECT symbol FROM equities /* sneaky */ WHERE 1=1",
+	} {
+		if err := validateSQL(sql); err == nil {
+			t.Errorf("validateSQL(%q) = nil, want rejection", sql)
+		}
+	}
+}
+
+// RawQuery accumulates every row into memory before responding, so an
+// unbounded self-join is an OOM path capped only by the statement timeout.
+// The prompt asked for a LIMIT; nothing checked.
+func TestEnforceRowLimit(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+		changed        bool
+	}{
+		{
+			name:    "missing limit gets one appended",
+			in:      "SELECT a.symbol FROM equities a JOIN equities b ON a.symbol = b.symbol WHERE 1=1",
+			want:    "SELECT a.symbol FROM equities a JOIN equities b ON a.symbol = b.symbol WHERE 1=1 LIMIT 50",
+			changed: true,
+		},
+		{
+			name:    "oversized limit is clamped",
+			in:      "SELECT symbol FROM equities WHERE 1=1 LIMIT 100000",
+			want:    "SELECT symbol FROM equities WHERE 1=1 LIMIT 50",
+			changed: true,
+		},
+		{
+			name:    "limit larger than an int saturates and clamps",
+			in:      "SELECT symbol FROM equities WHERE 1=1 LIMIT 99999999999999999999",
+			want:    "SELECT symbol FROM equities WHERE 1=1 LIMIT 50",
+			changed: true,
+		},
+		{
+			name:    "compliant limit is left alone",
+			in:      "SELECT symbol FROM equities WHERE 1=1 LIMIT 10",
+			want:    "SELECT symbol FROM equities WHERE 1=1 LIMIT 10",
+			changed: false,
+		},
+		{
+			name:    "limit exactly at the cap is left alone",
+			in:      "SELECT symbol FROM equities WHERE 1=1 LIMIT 50",
+			want:    "SELECT symbol FROM equities WHERE 1=1 LIMIT 50",
+			changed: false,
+		},
+		{
+			name:    "ranged limit within the cap is left alone",
+			in:      "SELECT symbol FROM equities WHERE 1=1 LIMIT 10, 40",
+			want:    "SELECT symbol FROM equities WHERE 1=1 LIMIT 10, 40",
+			changed: false,
+		},
+		{
+			name:    "ranged limit spanning too much is narrowed",
+			in:      "SELECT symbol FROM equities WHERE 1=1 LIMIT 10, 9000",
+			want:    "SELECT symbol FROM equities WHERE 1=1 LIMIT 10, 60",
+			changed: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := enforceRowLimit(tc.in)
+			if got != tc.want {
+				t.Errorf("sql  = %q\nwant = %q", got, tc.want)
+			}
+			if changed != tc.changed {
+				t.Errorf("changed = %v, want %v", changed, tc.changed)
+			}
+		})
+	}
+}
+
+// Whatever enforceRowLimit produces has to survive the safety checks.
+func TestEnforceRowLimit_OutputStaysValid(t *testing.T) {
+	for _, in := range []string{
+		"SELECT symbol FROM equities WHERE 1=1",
+		"SELECT symbol FROM equities WHERE 1=1 LIMIT 100000",
+		"WITH r AS (SELECT symbol FROM equities WHERE 1=1) SELECT * FROM r WHERE 1=1 LIMIT 900",
+	} {
+		out, _ := enforceRowLimit(in)
+		if err := validateSQL(out); err != nil {
+			t.Errorf("enforceRowLimit(%q) produced %q which fails validateSQL: %v", in, out, err)
+		}
+	}
+}
