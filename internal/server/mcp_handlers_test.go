@@ -152,6 +152,7 @@ func TestMCPToolValidationAndAuthorization(t *testing.T) {
 		{"technical tool requires pro", mcpToolCall{Name: "get_technical_indicators", Arguments: json.RawMessage(`{"symbol":"MTNGH"}`)}, basic, "Pro or Admin access required"},
 		{"technical pro dependency failure is safe", mcpToolCall{Name: "get_technical_indicators", Arguments: json.RawMessage(`{"symbol":"MTNGH"}`)}, pro, "market data is temporarily unavailable"},
 		{"history caps limit before database work", mcpToolCall{Name: "get_price_history", Arguments: json.RawMessage(`{"symbol":"MTNGH","limit":2001}`)}, basic, "limit must be between 1 and 2000"},
+		{"briefing rejects null arguments", mcpToolCall{Name: "get_market_briefing", Arguments: json.RawMessage(`null`)}, basic, "this tool takes no arguments"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,6 +161,19 @@ func TestMCPToolValidationAndAuthorization(t *testing.T) {
 				t.Fatalf("result = %+v, want error containing %q", result, tc.want)
 			}
 		})
+	}
+}
+
+func TestEmptyMCPArguments(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"", true}, {"{}", true}, {"{ }", true}, {"null", false}, {"[]", false}, {`{"unexpected":true}`, false},
+	} {
+		if got := emptyMCPArguments(json.RawMessage(tc.raw)); got != tc.want {
+			t.Errorf("emptyMCPArguments(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
 	}
 }
 

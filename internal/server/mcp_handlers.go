@@ -270,6 +270,17 @@ func decodeMCPParams(raw json.RawMessage, into any) bool {
 	return dec.Decode(into) == nil && ensureSingleJSONValue(dec) == nil
 }
 
+// emptyMCPArguments accepts omitted arguments and an empty JSON object only.
+// In particular, JSON null is not an object and must not bypass a tool's
+// argument contract.
+func emptyMCPArguments(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	var args map[string]json.RawMessage
+	return decodeMCPParams(raw, &args) && args != nil && len(args) == 0
+}
+
 func (s *Server) callMCPTool(r *http.Request, call mcpToolCall, user *auth.User) mcpToolResult {
 	var data any
 	var err error
@@ -305,8 +316,7 @@ func (s *Server) callMCPTool(r *http.Request, call mcpToolCall, user *auth.User)
 			data, err = s.mcpMovers(r, args.Direction, args.Limit)
 		}
 	case "get_market_briefing":
-		var args struct{}
-		if len(call.Arguments) > 0 && !decodeMCPParams(call.Arguments, &args) {
+		if !emptyMCPArguments(call.Arguments) {
 			err = errors.New("this tool takes no arguments")
 		} else {
 			data, err = s.mcpBriefing(r)
