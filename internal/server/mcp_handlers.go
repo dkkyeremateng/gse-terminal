@@ -17,7 +17,9 @@ import (
 )
 
 const (
-	mcpProtocolVersion = "2025-03-26"
+	// 2025-06-18 is the current MCP revision. It deliberately removed JSON-RPC
+	// batching, so this Streamable HTTP endpoint accepts one request per POST.
+	mcpProtocolVersion = "2025-06-18"
 	maxMCPBodyBytes    = 64 << 10
 	maxMCPHistoryBars  = 2_000
 	maxMCPMovers       = 50
@@ -93,9 +95,30 @@ var mcpTools = []mcpTool{
 	},
 	{
 		Name:        "get_technical_indicators",
-		Description: "Return deterministic RSI, SMA, and average-volume indicators for a GSE symbol. Requires Pro or Admin access.",
+		Description: "Return deterministic RSI, SMA, and average daily-volume indicators for a GSE symbol. Requires Pro or Admin access.",
 		InputSchema: objectSchema(map[string]any{"symbol": stringSchema("GSE ticker symbol")}, []string{"symbol"}),
 	},
+}
+
+func isMCPTool(name string) bool {
+	for _, tool := range mcpTools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// mcpOriginAllowed permits non-browser MCP clients (which do not send Origin)
+// and applies the application's configured origin allowlist to browser calls.
+func (s *Server) mcpOriginAllowed(r *http.Request) bool {
+	if r.Header.Get("Origin") == "" {
+		return true
+	}
+	if s.cfg == nil {
+		return false
+	}
+	return buildOriginChecker(s.cfg.AllowedOrigins)(r)
 }
 
 func objectSchema(properties map[string]any, required []string) map[string]any {
@@ -125,6 +148,10 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.mcpOriginAllowed(r) {
+		http.Error(w, "Origin not allowed", http.StatusForbidden)
+		return
+	}
 	user := auth.FromContext(r.Context())
 	if user.IsGuest() {
 		http.Error(w, "Authentication required", http.StatusUnauthorized)
@@ -134,7 +161,8 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPBodyBytes)
 	var req mcpRequest
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
+	// JSON-RPC permits extension members on the envelope. Tool arguments are
+	// decoded separately with DisallowUnknownFields below.
 	if err := dec.Decode(&req); err != nil {
 		s.writeMCPError(w, nil, -32700, "Parse error")
 		return
@@ -200,11 +228,13 @@ func (s *Server) dispatchMCP(r *http.Request, req mcpRequest, user *auth.User) (
 	switch req.Method {
 	case "initialize":
 		var params map[string]json.RawMessage
-		if !decodeMCPParams(req.Params, &params) || !decodeMCPParams(params["protocolVersion"], new(string)) {
-			return nil, &mcpError{Code: -32602, Message: "Unsupported protocol version"}
+		if !decodeMCPParams(req.Params, &params) || len(params["protocolVersion"]) == 0 {
+			return nil, &mcpError{Code: -32602, Message: "Missing initialize protocolVersion"}
 		}
 		var protocolVersion string
-		_ = json.Unmarshal(params["protocolVersion"], &protocolVersion)
+		if !decodeMCPParams(params["protocolVersion"], &protocolVersion) {
+			return nil, &mcpError{Code: -32602, Message: "Invalid initialize protocolVersion"}
+		}
 		if protocolVersion != mcpProtocolVersion {
 			return nil, &mcpError{Code: -32602, Message: "Unsupported protocol version"}
 		}
@@ -275,7 +305,8 @@ func (s *Server) callMCPTool(r *http.Request, call mcpToolCall, user *auth.User)
 			data, err = s.mcpMovers(r, args.Direction, args.Limit)
 		}
 	case "get_market_briefing":
-		if len(call.Arguments) > 0 && string(call.Arguments) != "{}" {
+		var args struct{}
+		if len(call.Arguments) > 0 && !decodeMCPParams(call.Arguments, &args) {
 			err = errors.New("this tool takes no arguments")
 		} else {
 			data, err = s.mcpBriefing(r)
@@ -297,8 +328,14 @@ func (s *Server) callMCPTool(r *http.Request, call mcpToolCall, user *auth.User)
 		err = errors.New("unknown tool")
 	}
 
-	metadata := map[string]interface{}{"tool": call.Name, "success": err == nil}
-	s.auditLog.Log(r.Context(), audit.ActionMCPToolCall, "mcp_tool", call.Name, metadata)
+	auditToolName := call.Name
+	if !isMCPTool(call.Name) {
+		// Never use an arbitrary caller-provided name as a bounded audit target.
+		// Still record the attempt without risking a failed audit insert.
+		auditToolName = "unknown"
+	}
+	metadata := map[string]interface{}{"tool": auditToolName, "success": err == nil}
+	s.auditLog.Log(r.Context(), audit.ActionMCPToolCall, "mcp_tool", auditToolName, metadata)
 	if err != nil {
 		return mcpErrorResult(err)
 	}
@@ -354,7 +391,15 @@ func (s *Server) mcpMovers(r *http.Request, direction string, limit int) (map[st
 	if err != nil {
 		return nil, errors.New("market data is temporarily unavailable")
 	}
-	gainers, losers := rankMovers(items, MoversMinVolume)
+	// Match buildMarketOverview: partial scraper rows and blank symbols must
+	// never qualify as movers or active listings.
+	validItems := make([]repository.MarketSummaryItem, 0, len(items))
+	for _, item := range items {
+		if item.Symbol != "" && item.LastPrice > 0 {
+			validItems = append(validItems, item)
+		}
+	}
+	gainers, losers := rankMovers(validItems, MoversMinVolume)
 	var rows []repository.MarketSummaryItem
 	switch direction {
 	case "gainers":
@@ -362,7 +407,7 @@ func (s *Server) mcpMovers(r *http.Request, direction string, limit int) (map[st
 	case "losers":
 		rows = losers
 	case "active":
-		rows = append([]repository.MarketSummaryItem(nil), items...)
+		rows = append([]repository.MarketSummaryItem(nil), validItems...)
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Volume > rows[j].Volume })
 	default:
 		return nil, errors.New("direction must be gainers, losers, or active")
@@ -395,19 +440,26 @@ func (s *Server) mcpTechnicalIndicators(r *http.Request, rawSymbol string) (map[
 	if s.qdbRepo == nil {
 		return nil, errors.New("market data is temporarily unavailable")
 	}
-	closes, err := s.qdbRepo.GetRecentCloses(r.Context(), symbol, 200)
+	bars, err := s.qdbRepo.GetRecentOHLC(r.Context(), symbol, "1d", 200)
 	if err != nil {
 		return nil, errors.New("market data is temporarily unavailable")
 	}
-	if len(closes) == 0 {
+	if len(bars) == 0 {
 		return nil, errors.New("no price history available")
 	}
+	closes := make([]float64, 0, len(bars))
+	volumes := make([]int64, 0, len(bars))
+	for _, bar := range bars {
+		closes = append(closes, bar.Close)
+		volumes = append(volumes, bar.Volume)
+	}
 	return map[string]any{
-		"symbol":     symbol,
-		"sampleSize": len(closes),
-		"rsi14":      math.Round(analysis.WilderRSI(closes, 14)*100) / 100,
-		"sma20":      math.Round(analysis.SMA(closes, 20)*100) / 100,
-		"sma50":      math.Round(analysis.SMA(closes, 50)*100) / 100,
+		"symbol":          symbol,
+		"sampleSize":      len(closes),
+		"rsi14":           math.Round(analysis.WilderRSI(closes, 14)*100) / 100,
+		"sma20":           math.Round(analysis.SMA(closes, 20)*100) / 100,
+		"sma50":           math.Round(analysis.SMA(closes, 50)*100) / 100,
+		"averageVolume20": analysis.AvgVolume(volumes, 20),
 	}, nil
 }
 

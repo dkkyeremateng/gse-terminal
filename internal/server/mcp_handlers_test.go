@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/teckdroids/ges-data-engine/internal/auth"
+	"github.com/teckdroids/ges-data-engine/internal/config"
 )
 
 func authenticatedMCPRequest(body string) *http.Request {
@@ -45,8 +46,10 @@ func TestHandleMCPProtocol(t *testing.T) {
 		wantCode int
 		wantErr  int
 	}{
-		{"initialize", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"1"}}}`, http.StatusOK, 0},
-		{"unsupported protocol", `{"jsonrpc":"2.0","id":11,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}`, http.StatusOK, -32602},
+		{"initialize", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"test","version":"1"}}}`, http.StatusOK, 0},
+		{"unsupported protocol", `{"jsonrpc":"2.0","id":11,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}`, http.StatusOK, -32602},
+		{"missing initialize version", `{"jsonrpc":"2.0","id":12,"method":"initialize","params":{}}`, http.StatusOK, -32602},
+		{"envelope extensions allowed", `{"jsonrpc":"2.0","id":13,"method":"ping","meta":{"trace":"abc"}}`, http.StatusOK, 0},
 		{"tools list", `{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{}}`, http.StatusOK, 0},
 		{"ping", `{"jsonrpc":"2.0","id":2,"method":"ping"}`, http.StatusOK, 0},
 		{"unknown method", `{"jsonrpc":"2.0","id":3,"method":"nope"}`, http.StatusOK, -32601},
@@ -94,6 +97,30 @@ func TestHandleMCPToolsListHasStrictSchemas(t *testing.T) {
 		if schema["additionalProperties"] != false {
 			t.Errorf("tool %s permits unknown arguments", tool["name"])
 		}
+	}
+}
+
+func TestHandleMCPOriginValidation(t *testing.T) {
+	server := &Server{cfg: &config.Config{AllowedOrigins: []string{"https://terminal.example"}}}
+	body := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
+	for _, tc := range []struct {
+		name   string
+		origin string
+		want   int
+	}{
+		{"non-browser client", "", http.StatusOK},
+		{"allowed browser", "https://terminal.example", http.StatusOK},
+		{"rejected origin", "https://evil.example", http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := authenticatedMCPRequest(body)
+			req.Header.Set("Origin", tc.origin)
+			rec := httptest.NewRecorder()
+			server.HandleMCP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+		})
 	}
 }
 
