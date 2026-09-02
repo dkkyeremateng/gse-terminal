@@ -152,6 +152,53 @@ docker compose ... exec caddy grep -c Strict-Transport /etc/caddy/Caddyfile
 A directive you just added reading `0` there means the mount is stale, not
 that the config is wrong.
 
+### A change to the query layer needs the derived cache flushed
+
+Every read that goes through `cachedJSONBytes` is stored in Redis under
+`gse:data:*` for six hours. The TTL is a safety net, not the freshness
+mechanism — an upload or a scrape invalidates the namespace explicitly. A
+**deploy does not**, because normally the data has not changed.
+
+That assumption breaks whenever a release changes how a stored value is
+*computed* rather than what is stored. The new binary is live, the query is
+fixed, and the endpoint still serves the old answer from cache until the
+TTL runs out. This has bitten twice: #5 (excluding zero closes from the
+chart queries) appeared not to work at all, and #24 (rebuilding the OHLC
+bars) would have, because the pre-deploy check that measured the problem
+had itself repopulated the cache with the wrong bars.
+
+After deploying a change to anything under `internal/repository` or to a
+handler's cache key, flush the namespace:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml \
+  exec -T redis redis-cli --scan --pattern 'gse:data:*'          # look first
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml \
+  exec -T redis sh -c "redis-cli --scan --pattern 'gse:data:*' | xargs -r redis-cli DEL"
+```
+
+Order matters: recreate the app **first**, then flush. Flushing while the
+old binary is still serving lets any request in the gap refill the cache
+with exactly the values you are trying to remove.
+
+Then confirm the keys are actually gone:
+
+```bash
+docker compose ... exec -T redis redis-cli --scan --pattern 'gse:data:*'
+```
+
+Empty is the only acceptable answer. The piped `xargs` form above has been
+observed to exit 0 while deleting nothing when it is nested inside
+`sh -c` inside `exec -T`; if keys survive, delete them by name:
+
+```bash
+docker compose ... exec -T redis redis-cli DEL gse:data:history:MTNGH:1d
+```
+
+`gse:llm:*` is deliberately a separate namespace so a daily scrape does not
+discard LLM output and burn the provider quota on the next page load. Leave
+it alone unless the release changed how insights are generated.
+
 ## Operational notes
 
 - **The daily scrape** runs at 16:30 UTC and drives a headless Chromium
