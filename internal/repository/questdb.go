@@ -373,6 +373,57 @@ func (r *QuestDBRepo) GetOHLC(ctx context.Context, symbol, interval string) ([]O
 	return result, nil
 }
 
+// GetRecentOHLC returns at most limit of the most recent aggregated bars in
+// chronological order. Unlike GetOHLC, it bounds the query at the database so
+// automation clients cannot turn a small response request into a full-history
+// scan.
+//
+// Shares ohlcProjection with GetOHLC and GetOHLCBatch so every caller sees
+// the same bars. Building the aggregates here instead would have shipped a
+// third copy of the projection that #24 corrected, and an MCP client reading
+// an open above its own high is worse than a chart drawing one.
+func (r *QuestDBRepo) GetRecentOHLC(ctx context.Context, symbol, interval string, limit int) ([]OHLC, error) {
+	if err := validateInterval(interval); err != nil {
+		return nil, err
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("invalid limit %d", limit)
+	}
+	query := fmt.Sprintf(`
+		SELECT%s
+		FROM equities
+		-- See GetOHLC: a zero close is "no price published", not a price of
+		-- zero, and including those rows sinks min() to the axis.
+		WHERE symbol = $1 AND close_price_vwap > 0
+		SAMPLE BY %s ALIGN TO CALENDAR
+		ORDER BY trading_date DESC
+		LIMIT $2;
+	`, ohlcProjection, interval)
+	ctx, cancel := withQueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.queryPool.Query(ctx, query, symbol, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]OHLC, 0, limit)
+	for rows.Next() {
+		var row ohlcRow
+		if err := row.scan(rows); err != nil {
+			return nil, err
+		}
+		out = append(out, row.resolve())
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 // GetOHLCBatch fetches OHLC series for several symbols in a single round
 // trip. Replaces N sequential GetOHLC calls in HandleGetCompare. Symbols
 // are filtered server-side via WHERE symbol IN ($1,$2,…) so QuestDB only
