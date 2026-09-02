@@ -640,6 +640,49 @@ func (r *QuestDBRepo) GetLastIngestionTime(ctx context.Context) (time.Time, erro
 	return ts, err
 }
 
+// synthesizeQuote fills in a missing bid/offer and derives the spread.
+//
+// CSV-uploaded rows carry no depth at all (both columns stay 0), so a ±1%
+// band around the last price gives the panel something to render. That is
+// only defensible when BOTH sides are absent: the two synthetic prices
+// straddle the last price and are obviously derived.
+//
+// Applying it per-side is not. The exchange quotes one side far more often
+// than both -- of the rows carrying a published close, 25% quote only a bid
+// and 32% only an offer, against 19% that quote both -- and synthesizing
+// the missing half against last_price puts a fabricated price next to a
+// real one with nothing keeping them on the correct sides. On 8,159 rows it
+// lands on the wrong side outright and the book comes back crossed: EGL
+// closed at 6.53 with a real bid of 6.75, and the synthetic offer of
+// 6.53 x 1.01 = 6.60 sat below it, for a spread of -0.15.
+//
+// A crossed book is not a lightly wrong number, it is an impossible one --
+// it reads as free money. Six of the 41 symbols in the current snapshot
+// were reporting one, on the public quote endpoint and in the terminal's
+// depth panel.
+//
+// So a missing side now stays 0, which is already how this system spells
+// "not quoted" -- it is what the equities columns hold and what the NL->SQL
+// prompt documents. Showing nothing is better than showing a price that
+// cannot exist.
+func synthesizeQuote(item *MarketSummaryItem) {
+	if item.BidPrice == 0 && item.OfferPrice == 0 && item.LastPrice > 0 {
+		item.BidPrice = math.Round(item.LastPrice*0.99*100) / 100
+		item.OfferPrice = math.Round(item.LastPrice*1.01*100) / 100
+	}
+	// A spread needs both sides. With one missing, offer-bid is not a
+	// spread, it is the quoted side measured against zero -- which is how
+	// EGL reported -2.25%.
+	if item.BidPrice <= 0 || item.OfferPrice <= 0 {
+		item.Spread, item.SpreadPct = 0, 0
+		return
+	}
+	item.Spread = math.Round((item.OfferPrice-item.BidPrice)*100) / 100
+	if mid := (item.BidPrice + item.OfferPrice) / 2; mid > 0 {
+		item.SpreadPct = math.Round((item.OfferPrice-item.BidPrice)/mid*10000) / 100
+	}
+}
+
 func (r *QuestDBRepo) GetMarketSummary(ctx context.Context) ([]MarketSummaryItem, error) {
 	query := `
 		SELECT symbol, open_price, close_price_vwap, total_volume,
@@ -670,22 +713,7 @@ func (r *QuestDBRepo) GetMarketSummary(ctx context.Context) ([]MarketSummaryItem
 		if item.OpenPrice != 0 {
 			item.PercentChange = (item.PriceChange / item.OpenPrice) * 100.0
 		}
-		// CSV-uploaded rows don't carry bid/offer (columns stay 0).
-		// Fall back to a ±1% heuristic around the last price so the
-		// depth panel always has something to show. Matches the same
-		// heuristic the live scraper uses (collector/ticker.go:162-163).
-		if item.BidPrice == 0 && item.LastPrice > 0 {
-			item.BidPrice = math.Round(item.LastPrice*0.99*100) / 100
-		}
-		if item.OfferPrice == 0 && item.LastPrice > 0 {
-			item.OfferPrice = math.Round(item.LastPrice*1.01*100) / 100
-		}
-		// Derive spread + spread% from bid/offer.
-		item.Spread = math.Round((item.OfferPrice-item.BidPrice)*100) / 100
-		mid := (item.BidPrice + item.OfferPrice) / 2
-		if mid > 0 {
-			item.SpreadPct = math.Round((item.OfferPrice-item.BidPrice)/mid*10000) / 100
-		}
+		synthesizeQuote(&item)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {

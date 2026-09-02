@@ -17,6 +17,13 @@ function fmtPrice(v) {
 }
 
 function renderDepth(container, data) {
+    // The exchange quotes one side far more often than both. When a side is
+    // missing the server now leaves it at 0 rather than inventing a price
+    // from the last trade, which used to produce a bid above the offer.
+    // fmtPrice already renders 0 as "—"; spreadPct needs the same rule, or
+    // a one-sided book shows "0.00%" beside two em dashes.
+    const hasBook = data.bidPrice > 0 && data.offerPrice > 0;
+
     // Position of lastPrice within the bid–offer range (0–100%).
     const range = data.offerPrice - data.bidPrice;
     const lastPos = range > 0
@@ -33,7 +40,7 @@ function renderDepth(container, data) {
             <div class="text-center px-4">
                 <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest mb-0.5">Spread</p>
                 <p class="text-xs font-bold text-slate-300">${fmtPrice(data.spread)}</p>
-                <p class="text-[9px] text-slate-500 mono">${data.spreadPct != null ? data.spreadPct.toFixed(2) + '%' : '—'}</p>
+                <p class="text-[9px] text-slate-500 mono">${hasBook && data.spreadPct != null ? data.spreadPct.toFixed(2) + '%' : '—'}</p>
             </div>
             <div class="text-center flex-1">
                 <p class="text-[9px] text-rose-400 uppercase font-black tracking-widest mb-0.5">Offer</p>
