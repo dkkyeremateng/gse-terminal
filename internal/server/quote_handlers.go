@@ -65,18 +65,19 @@ func (s *Server) quote(ctx context.Context, symbol string) (*QuoteResponse, erro
 		if item.Symbol != symbol {
 			continue
 		}
+		// The repository already applied the ±1% fallback where it is
+		// safe to (both sides absent) and left a missing side at 0. Do
+		// not re-derive it here: the previous per-side version put a
+		// synthetic price beside a real one and produced crossed books.
+		// See synthesizeQuote in internal/repository/questdb.go.
 		bid, offer := item.BidPrice, item.OfferPrice
-		if bid == 0 && item.LastPrice > 0 {
-			bid = math.Round(item.LastPrice*0.99*100) / 100
-		}
-		if offer == 0 && item.LastPrice > 0 {
-			offer = math.Round(item.LastPrice*1.01*100) / 100
-		}
-		spread := math.Round((offer-bid)*100) / 100
-		mid := math.Round((bid+offer)/2*100) / 100
-		spreadPct := 0.0
-		if mid > 0 {
-			spreadPct = math.Round((offer-bid)/mid*10000) / 100
+		spread, mid, spreadPct := 0.0, 0.0, 0.0
+		if bid > 0 && offer > 0 {
+			spread = math.Round((offer-bid)*100) / 100
+			mid = math.Round((bid+offer)/2*100) / 100
+			if mid > 0 {
+				spreadPct = math.Round((offer-bid)/mid*10000) / 100
+			}
 		}
 		return &QuoteResponse{Symbol: item.Symbol, LastPrice: item.LastPrice, OpenPrice: item.OpenPrice, BidPrice: bid, OfferPrice: offer, Spread: spread, SpreadPct: spreadPct, MidPrice: mid, Volume: item.Volume}, nil
 	}
