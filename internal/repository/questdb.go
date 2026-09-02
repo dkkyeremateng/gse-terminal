@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	qdb "github.com/questdb/go-questdb-client/v3"
 )
@@ -235,18 +236,108 @@ type OHLC struct {
 	Volume      int64     `json:"volume"`
 }
 
+// ohlcProjection is the aggregate list shared by every OHLC query, so the
+// bars a chart draws and the bars any other caller receives are built the
+// same way.
+//
+// The exchange publishes no intraday high or low. Each daily row carries an
+// opening price, a last traded price, and the VWAP close -- nothing else.
+// Taking high and low from close_price_vwap alone therefore produced bars
+// whose open sat outside [low, high] whenever the open differed from the
+// VWAP, which on live data was 721 of MTNGH's 1,959 sessions. The honest
+// reconstruction is the range spanned by the three prices we actually have.
+//
+// Six scalar aggregates rather than a per-row expression because QuestDB
+// 7.4.0 has no greatest()/least(). That is exact, not an approximation:
+// max distributes over the bucket, so max over rows of max(open, close,
+// last) is the same as max(max(open), max(close), max(last)). Same for min.
+//
+// nullif(...,0) keeps "no price published" out of the extremes -- min and
+// max both ignore NULL, so a day that never traded cannot drag the low to
+// zero. close_price_vwap needs no guard because every caller already
+// filters close_price_vwap > 0. The open is nulled too: four rows in the
+// table carry a real close with no opening price, and left as 0 the open
+// would sit below its own bar.
+const ohlcProjection = `
+		trading_date,
+		first(nullif(open_price, 0)) AS open,
+		max(nullif(open_price, 0)) AS high_open,
+		max(close_price_vwap) AS high_close,
+		max(nullif(last_price, 0)) AS high_last,
+		min(nullif(open_price, 0)) AS low_open,
+		min(close_price_vwap) AS low_close,
+		min(nullif(last_price, 0)) AS low_last,
+		last(close_price_vwap) AS close,
+		sum(total_volume) AS volume`
+
+// ohlcRow is the scan target for ohlcProjection. The pointer fields are the
+// columns that can come back NULL once nullif has removed unpublished
+// prices.
+type ohlcRow struct {
+	TradingDate time.Time
+	Open        *float64
+	HighOpen    *float64
+	HighClose   float64
+	HighLast    *float64
+	LowOpen     *float64
+	LowClose    float64
+	LowLast     *float64
+	Close       float64
+	Volume      int64
+}
+
+// scan reads one row of ohlcProjection in its declared column order.
+func (o *ohlcRow) scan(rows pgx.Rows) error {
+	return rows.Scan(&o.TradingDate, &o.Open, &o.HighOpen, &o.HighClose, &o.HighLast,
+		&o.LowOpen, &o.LowClose, &o.LowLast, &o.Close, &o.Volume)
+}
+
+// resolve collapses the per-column extremes into a single bar whose open and
+// close are guaranteed to lie within [low, high].
+func (o ohlcRow) resolve() OHLC {
+	high, low := o.HighClose, o.LowClose
+	for _, v := range []*float64{o.HighOpen, o.HighLast} {
+		if v != nil && *v > high {
+			high = *v
+		}
+	}
+	for _, v := range []*float64{o.LowOpen, o.LowLast} {
+		if v != nil && *v > 0 && *v < low {
+			low = *v
+		}
+	}
+	// A bucket with no published opening price falls back to the close,
+	// matching how the collector substitutes the VWAP for an absent last
+	// trade rather than reporting a price of zero.
+	open := o.Close
+	if o.Open != nil && *o.Open > 0 {
+		open = *o.Open
+	}
+	// Fold the open and close into the range rather than trusting the
+	// projection to have covered them. It does today -- high_open/low_open
+	// are the same column `open` is drawn from, so the open is already
+	// inside -- but that is an invariant living in a SQL string several
+	// hundred lines away. Dropping one of those aggregates as "redundant"
+	// would silently reintroduce exactly the inconsistency this exists to
+	// remove, and these four comparisons make resolve correct on its own
+	// terms instead.
+	for _, v := range []float64{open, o.Close} {
+		if v > high {
+			high = v
+		}
+		if v > 0 && v < low {
+			low = v
+		}
+	}
+	return OHLC{TradingDate: o.TradingDate, Open: open, High: high, Low: low, Close: o.Close, Volume: o.Volume}
+}
+
 func (r *QuestDBRepo) GetOHLC(ctx context.Context, symbol, interval string) ([]OHLC, error) {
 	if err := validateInterval(interval); err != nil {
 		return nil, err
 	}
 	query := fmt.Sprintf(`
-		SELECT
-			trading_date,
-			first(open_price) as open,
-			max(close_price_vwap) as high,
-			min(close_price_vwap) as low,
-			last(close_price_vwap) as close,
-			sum(total_volume) as volume
+		SELECT%s
 		FROM equities
 		-- A zero close is "no price published", not a price of zero: days a
 		-- symbol did not trade, and partial rows the live scraper writes
@@ -257,7 +348,7 @@ func (r *QuestDBRepo) GetOHLC(ctx context.Context, symbol, interval string) ([]O
 		WHERE symbol = $1 AND close_price_vwap > 0
 		SAMPLE BY %s ALIGN TO CALENDAR
 		ORDER BY trading_date ASC;
-	`, interval)
+	`, ohlcProjection, interval)
 
 	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
@@ -269,12 +360,11 @@ func (r *QuestDBRepo) GetOHLC(ctx context.Context, symbol, interval string) ([]O
 
 	var result []OHLC
 	for rows.Next() {
-		var o OHLC
-		err := rows.Scan(&o.TradingDate, &o.Open, &o.High, &o.Low, &o.Close, &o.Volume)
-		if err != nil {
+		var row ohlcRow
+		if err := row.scan(rows); err != nil {
 			return nil, err
 		}
-		result = append(result, o)
+		result = append(result, row.resolve())
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -321,21 +411,15 @@ func (r *QuestDBRepo) GetOHLCBatch(ctx context.Context, symbols []string, interv
 		dateFilter = fmt.Sprintf(" AND trading_date >= %s", placeholders[len(placeholders)-1])
 	}
 	query := fmt.Sprintf(`
-		SELECT
-			trading_date,
-			symbol,
-			first(open_price) as open,
-			max(close_price_vwap) as high,
-			min(close_price_vwap) as low,
-			last(close_price_vwap) as close,
-			sum(total_volume) as volume
+		SELECT%s,
+			symbol
 		FROM equities
 		-- See GetOHLC: a zero close means no published price, and would
 		-- otherwise sink both min() and the rendered line.
 		WHERE symbol IN (%s) AND close_price_vwap > 0%s
 		SAMPLE BY %s ALIGN TO CALENDAR
 		ORDER BY symbol, trading_date ASC;
-	`, strings.Join(placeholders[:len(symbols)], ","), dateFilter, interval)
+	`, ohlcProjection, strings.Join(placeholders[:len(symbols)], ","), dateFilter, interval)
 
 	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
@@ -346,12 +430,13 @@ func (r *QuestDBRepo) GetOHLCBatch(ctx context.Context, symbols []string, interv
 	defer rows.Close()
 
 	for rows.Next() {
+		var row ohlcRow
 		var sym string
-		var o OHLC
-		if err := rows.Scan(&o.TradingDate, &sym, &o.Open, &o.High, &o.Low, &o.Close, &o.Volume); err != nil {
+		if err := rows.Scan(&row.TradingDate, &row.Open, &row.HighOpen, &row.HighClose, &row.HighLast,
+			&row.LowOpen, &row.LowClose, &row.LowLast, &row.Close, &row.Volume, &sym); err != nil {
 			return nil, err
 		}
-		out[sym] = append(out[sym], o)
+		out[sym] = append(out[sym], row.resolve())
 	}
 	return out, rows.Err()
 }
