@@ -1,9 +1,19 @@
-# Stage 1: Build the UI assets
+# Stage 1: Build the legacy terminal's assets
 FROM node:20-alpine AS ui-build
 WORKDIR /app/ui
 COPY ui/package*.json ./
 RUN npm ci
 COPY ui/ ./
+RUN npm run build
+
+# Stage 1b: Build the React client served at /v2. Separate stage so the two
+# frontends build in parallel and a change to one doesn't invalidate the
+# other's npm ci layer.
+FROM node:20-alpine AS web-build
+WORKDIR /app/web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build the Go backend
@@ -19,9 +29,11 @@ RUN go mod download
 
 # Build the binary
 COPY . .
-# Copy the built UI assets from Stage 1 into the Go build context
-# so they can be embedded via //go:embed in ui/embed.go
+# Copy both built frontends into the Go build context so they can be
+# embedded via //go:embed — ui/embed.go and web/embed.go. Neither package
+# compiles without its dist/ tree present.
 COPY --from=ui-build /app/ui/dist ./ui/dist
+COPY --from=web-build /app/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o server ./cmd/server
 
 # Stage 3: Runtime — the Go server plus a headless Chromium, so the daily

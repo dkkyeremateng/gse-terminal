@@ -93,23 +93,13 @@ func (s *Server) HandleLoginPost(w http.ResponseWriter, r *http.Request) {
 	username := auth.NormalizeUsername(r.FormValue("username"))
 	password := r.FormValue("password")
 
-	userID, hash, role, isLocked, lookupErr := s.pgRepo.GetUserByUsername(r.Context(), username)
+	// checkCredentials (json_auth_handlers.go) owns the timing-equalised
+	// bcrypt compare and the audit entries; this handler only renders the
+	// outcome for the HTMX form.
+	userID, role, result := s.checkCredentials(r.Context(), username, password)
 
-	// Always spend a bcrypt comparison, even when the username is unknown,
-	// so the response time does not disclose whether the account exists.
-	compareAgainst := []byte(hash)
-	if lookupErr != nil {
-		compareAgainst = decoyHash
-	}
-	passwordOK := bcrypt.CompareHashAndPassword(compareAgainst, []byte(password)) == nil
-
-	if lookupErr != nil || !passwordOK {
-		if lookupErr == nil {
-			s.auditLog.Log(r.Context(), audit.ActionLoginFailure, "Auth", "Login", map[string]interface{}{
-				"username": username,
-				"role":     role,
-			})
-		}
+	switch result {
+	case credentialsInvalid:
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK)
 		} else {
@@ -117,14 +107,12 @@ func (s *Server) HandleLoginPost(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, "Invalid credentials")
 		return
-	}
-
-	// Locked is reported only after the password checks out. Reporting it
-	// first told anyone who guessed a username that the account existed and
-	// was suspended; now that is only visible to someone who could have
-	// logged in anyway, and the legitimate user still gets a message that
-	// explains why they cannot.
-	if isLocked {
+	case credentialsLocked:
+		// Locked is reported only after the password checks out. Reporting
+		// it first told anyone who guessed a username that the account
+		// existed and was suspended; now that is only visible to someone
+		// who could have logged in anyway, and the legitimate user still
+		// gets a message that explains why they cannot.
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK)
 		} else {
@@ -133,10 +121,6 @@ func (s *Server) HandleLoginPost(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Account access suspended. Contact administrator.")
 		return
 	}
-	s.auditLog.Log(r.Context(), audit.ActionLoginSuccess, "Auth", "Login", map[string]interface{}{
-		"username": username,
-		"role":     role,
-	})
 
 	if err := s.issueSessionCookie(w, r, userID, username, role); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -156,68 +140,15 @@ func (s *Server) HandleSignupPost(w http.ResponseWriter, r *http.Request) {
 	username := auth.NormalizeUsername(r.FormValue("username"))
 	password := r.FormValue("password")
 
-	if username == "" || password == "" {
+	// createAccount (json_auth_handlers.go) owns the validation chain, the
+	// duplicate check, and the auto-login cookie issue.
+	if aerr := s.createAccount(w, r, username, password); aerr != nil {
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK)
 		} else {
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(aerr.status)
 		}
-		fmt.Fprintf(w, "Username and password required")
-		return
-	}
-	// Reject Unicode lookalikes ("аdmin" with Cyrillic а), control chars,
-	// and mixed-case impersonation handles up-front. Without this an
-	// attacker could register a visually identical username and use it
-	// in social-engineering against admins.
-	if err := auth.ValidateUsername(username); err != nil {
-		if r.Header.Get("HX-Request") == "true" {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-		}
-		fmt.Fprint(w, err.Error())
-		return
-	}
-	if err := auth.ValidatePassword(password); err != nil {
-		if r.Header.Get("HX-Request") == "true" {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-		}
-		fmt.Fprint(w, err.Error())
-		return
-	}
-
-	// Check if user exists already
-	_, _, _, _, err := s.pgRepo.GetUserByUsername(r.Context(), username)
-	if err == nil {
-		if r.Header.Get("HX-Request") == "true" {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusConflict)
-		}
-		fmt.Fprintf(w, "Username already exists")
-		return
-	}
-
-	err = s.pgRepo.CreateUser(r.Context(), username, password, "user")
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Could not create user")
-		return
-	}
-
-	// Auto-login after signup
-	userID, _, role, _, err := s.pgRepo.GetUserByUsername(r.Context(), username)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Signup successful, but login failed")
-		return
-	}
-
-	if err := s.issueSessionCookie(w, r, userID, username, role); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Error generating token")
+		fmt.Fprint(w, aerr.message)
 		return
 	}
 
@@ -738,17 +669,17 @@ func (s *Server) HandleMergeAccount(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
-	// Best-effort: parse the current session JWT and add its jti to the
-	// revocation list so the cookie can't be replayed before its natural
-	// expiry. Soft-fail on every step — logout must always succeed.
-	//
-	// Failures are logged loudly (Warn) so monitoring can surface a
-	// stuck Redis: the previous silent swallow meant a flaky logout
-	// could leave a stolen JWT replayable for up to 24h with no
-	// telemetry. The refresh-cookie clear below uses the same Redis
-	// connection, so a logout during a Redis outage is genuinely
-	// best-effort — but at least we'll see it in the logs.
+// revokeSession tears down the caller's session: the access token's jti goes
+// on the revocation list, the refresh token is dropped from Redis, and both
+// cookies are cleared. Shared by the form logout below and the JSON logout in
+// json_auth_handlers.go so neither can forget a step.
+//
+// Every stage soft-fails — logout must always succeed — but failures are
+// logged loudly (Warn) so monitoring can surface a stuck Redis: a silent
+// swallow meant a flaky logout could leave a stolen JWT replayable for up to
+// 24h with no telemetry. The refresh-cookie clear uses the same Redis
+// connection, so a logout during a Redis outage is genuinely best-effort.
+func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request) {
 	if revoker := s.authSvc.Revoker(); revoker != nil {
 		if cookie, err := r.Cookie("session"); err == nil && cookie.Value != "" {
 			if claims, err := s.authSvc.ParseToken(cookie.Value); err == nil {
@@ -779,6 +710,10 @@ func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Secure:   s.secureCookie(),
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	s.revokeSession(w, r)
 
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", "/login")

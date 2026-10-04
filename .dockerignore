@@ -1,0 +1,27 @@
+# The frontend build stages run `npm ci` themselves; copying the host's
+# node_modules over that result ships macOS-built native binaries into a
+# linux image, and it is the bulk of the build context either way.
+node_modules/
+ui/node_modules/
+web/node_modules/
+
+# Built by the ui-build / web-build stages and copied in from there. A stale
+# host copy landing in the Go build context would be embedded and then
+# silently overwritten — or not, if a stage is skipped.
+ui/dist/
+web/dist/
+
+# Never belongs in an image.
+.env
+.env.local
+*.local
+k8s/secrets.yaml
+
+.git/
+.github/
+logs/
+*.log
+server
+.DS_Store
+.vscode/
+.idea/

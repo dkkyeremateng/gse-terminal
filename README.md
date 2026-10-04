@@ -12,7 +12,7 @@ with an embedded UI.
   format can be uploaded by hand from the admin panel; both paths share one
   parser, so a backfill and a scheduled run behave identically.
 - **Market data.** OHLC history, symbol comparison, sector rotation, top
-  movers, bid/offer spreads, and a CSV export — 61 `/v1/*` endpoints.
+  movers, bid/offer spreads, and a CSV export — 65 `/v1/*` endpoints.
 - **Watchlists and alerts.** Per-user rules evaluated after every ingest,
   delivered in-app, by email, and by Web Push.
 - **AI oracle.** Per-symbol commentary and a daily market briefing, plus a
@@ -35,9 +35,20 @@ with an embedded UI.
 (CSV parsing), `analysis` (indicators, LLM clients, NL→SQL), `alerts`,
 `auth`, `push`, `repository` (all three datastores), `server` (handlers).
 
-Two frontends live in the repo: `ui/` is the shipped terminal (vanilla JS +
-htmx + Tailwind, compiled by Vite and embedded into the binary via
-`go:embed`), and `web/` is a React/Radix rewrite in progress.
+Two frontends live in the repo, both compiled by Vite and embedded into the
+binary via `go:embed`, and both served by the same process:
+
+| Path | Tree | What it is |
+|---|---|---|
+| `/terminal` | `ui/` | The shipped terminal — vanilla JS + htmx + Tailwind |
+| `/v2` | `web/` | React 19 + Radix rewrite, in progress |
+
+`/v2` is a single-page app: the Go handler serves its content-hashed bundles
+and falls back to `index.html` for any client-side route, so deep links and
+refreshes work. It is public in the same sense `/terminal` is — the bundle is
+static, and every `/v1/*` call it makes is authenticated on its own terms.
+Both dist/ trees are `go:embed` inputs, so **`go build` fails unless the
+frontends have been built first** (`make ui web`, or just `make go-build`).
 
 The LLM layer takes any provider: Gemini, Anthropic, OpenAI, or **any
 OpenAI-compatible endpoint** (Ollama, vLLM, OpenRouter, Groq, LiteLLM) via
@@ -61,11 +72,18 @@ Requires Go 1.25, Node 20, and Docker.
 cp .env.example .env      # fill in JWT_SECRET at minimum
 docker compose up -d      # QuestDB, Postgres, Redis
 cd ui && npm ci && npm run build && cd ..
+cd web && npm ci && npm run build && cd ..
 go run ./cmd/server
 ```
 
-The server listens on `:8080`. First boot creates an `admin` user and
-prints its password **once** — save it.
+The server listens on `:8080` — `/terminal` for the shipped UI, `/v2` for the
+React client. First boot creates an `admin` user and prints its password
+**once** — save it.
+
+For frontend work, `make dev-ui` and `make dev-web` start the respective Vite
+dev servers with HMR against a backend on `:8080`. The React dev server hosts
+the app at `http://localhost:5173/v2/`, matching where it is mounted in
+production, and proxies `/v1`, `/auth` and `/ws` to the Go process.
 
 There is no seed data. Either wait for the 16:30 UTC scrape, upload a CSV
 from the admin panel, or fetch a date range directly:

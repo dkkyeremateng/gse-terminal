@@ -319,6 +319,13 @@ func main() {
 		if strings.HasPrefix(p, "/static/") {
 			return true
 		}
+		// Same reasoning for the React client's content-hashed bundles:
+		// route-level code splitting means a single navigation can pull
+		// a handful of chunks, and a 429 on one of them white-screens
+		// the app rather than merely slowing it down.
+		if strings.HasPrefix(p, server.SPABasePath+"/assets/") {
+			return true
+		}
 		return false
 	}
 	skipForCondition := func(skip func(*http.Request) bool, mw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
@@ -458,7 +465,25 @@ func main() {
 		// Callback needs auth middleware to read the session cookie for
 		// the account-linking flow (link: prefixed state).
 		r.With(authSvc.Middleware).Get("/auth/{provider}/callback", srv.HandleOAuthCallback)
+
+		// JSON counterparts for the /v2 React client. Same handlers'
+		// worth of work — same credential check, same audit entries,
+		// same session + refresh cookies — but a status code and a JSON
+		// body instead of a 302 into a page the SPA doesn't own. They
+		// sit inside this group deliberately: a JSON endpoint that
+		// checks a password is a bruteforce oracle exactly like the
+		// form one, and must share its 5/min budget.
+		r.Post("/v1/auth/login", srv.HandleAPILogin)
+		r.Post("/v1/auth/signup", srv.HandleAPISignup)
 	})
+
+	// Logout revokes rather than verifies, so it belongs outside the
+	// bruteforce limiter above — capping it at 5/min would strand a user
+	// who is trying to end a session. Refresh runs behind the auth
+	// middleware because that is what performs the silent renewal; the
+	// handler only reports whether it produced one.
+	r.Post("/v1/auth/logout", srv.HandleAPILogout)
+	r.With(authSvc.Middleware).Post("/v1/auth/refresh", srv.HandleAPIRefresh)
 
 	// API - Public Data
 	r.Get("/v1/history", srv.HandleGetHistory)
@@ -521,6 +546,21 @@ func main() {
 		})
 		slog.Info("MCP endpoint enabled", "path", "/mcp")
 	}
+
+	// The React client. Public like /terminal — the app's own route guards
+	// and the per-endpoint auth on /v1/* do the gating, so there is nothing
+	// to protect in the bundle itself. No auth middleware is mounted here
+	// because the handler only ever serves static files; every call the app
+	// makes afterwards goes to /v1/* and is authenticated there.
+	spaHandler, err := server.NewSPAHandler(cfg)
+	if err != nil {
+		slog.Error("Failed to construct SPA handler", "error", err)
+		os.Exit(1)
+	}
+	// Both patterns are needed: chi matches "/v2" and "/v2/*" separately,
+	// and without the bare form the entry point itself 404s.
+	r.Handle(server.SPABasePath, spaHandler)
+	r.Handle(server.SPABasePath+"/*", spaHandler)
 
 	// API - Session dependent (Guest friendly)
 	r.Group(func(r chi.Router) {

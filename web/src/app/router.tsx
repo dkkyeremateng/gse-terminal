@@ -59,7 +59,7 @@ function lazyRoute(Element: React.ComponentType) {
   )
 }
 
-export const router = createBrowserRouter([
+const routes = [
   {
     element: <Root />,
     children: [
@@ -114,4 +114,18 @@ export const router = createBrowserRouter([
       { path: '*', element: <NotFound /> },
     ],
   },
-])
+]
+
+/**
+ * Every route above is written root-relative, and the basename shifts the
+ * whole tree under the mount point. Derived from Vite's `base` rather than
+ * hard-coded so the two can't disagree: `BASE_URL` is '/v2/' in a normal
+ * build, and the trailing slash has to go because React Router wants
+ * '/v2' (a bare '/' when the app is served from the root).
+ *
+ * Only the router moves. Every API path the app calls stays absolute —
+ * the Go API lives at /v1/* on the origin root, not under the mount.
+ */
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
+
+export const router = createBrowserRouter(routes, { basename })
