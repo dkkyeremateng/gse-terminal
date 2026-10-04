@@ -2,6 +2,15 @@ module github.com/teckdroids/ges-data-engine
 
 go 1.25.0
 
+// web/node_modules ships a Go port of `flatted`, and adding web/embed.go put
+// that tree inside this module — so `go build ./...` and `go test ./...`
+// started walking an npm dependency's vendored Go package. Ignoring both
+// node_modules trees keeps package patterns to this repo's own code.
+ignore (
+	./ui/node_modules
+	./web/node_modules
+)
+
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/go-chi/chi/v5 v5.1.0

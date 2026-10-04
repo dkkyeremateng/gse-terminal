@@ -51,7 +51,7 @@ endif
 
 .PHONY: build push deploy rollout \
         k8s-apply k8s-diff k8s-image k8s-rollback k8s-status k8s-logs k8s-restart k8s-describe \
-        dev dev-ui ui go-build test lint clean help \
+        dev dev-ui dev-web ui web go-build test lint clean help \
         guard-clean-tree guard-on-main guard-kubectl-context guard-auth \
         audit-deploy-attempted audit-deploy-succeeded
 
@@ -201,16 +201,24 @@ vm-config: ## Render the merged production config (validates .env)
 backup: ## Back up Postgres + QuestDB to ./backups
 	./scripts/backup.sh
 
-dev: ui ## Start Go server (reads from ui/dist/)
+dev: ui web ## Start Go server (reads from ui/dist/ and web/dist/)
 	APP_ENV=development go run ./cmd/server
 
 dev-ui: ## Start Vite dev server with HMR (use with 'make dev' in another terminal)
 	cd ui && npm run dev
 
+dev-web: ## Start the /v2 React dev server with HMR (proxies the API to :8080)
+	cd web && npm run dev
+
 ui: ## Build UI assets (Tailwind + Vite)
 	cd ui && npm run build
 
-go-build: ## Build Go binary locally
+web: ## Build the /v2 React client (embedded via web/embed.go)
+	cd web && npm run build
+
+# Both dist/ trees are //go:embed inputs, so the Go build fails outright
+# without them — never `go build` here without building the frontends first.
+go-build: ui web ## Build Go binary locally
 	go build -o server ./cmd/server
 
 # ── Testing ─────────────────────────────────────────────────────────────
@@ -225,7 +233,7 @@ lint: ## Run go vet
 
 clean: ## Remove build artifacts
 	rm -f server
-	rm -rf ui/dist
+	rm -rf ui/dist web/dist
 
 # ── Help ────────────────────────────────────────────────────────────────
 

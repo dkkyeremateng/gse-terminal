@@ -77,6 +77,12 @@ tags:
     description: Watchlist alert rules with email and in-app delivery. Pro/Admin.
   - name: Keys
     description: Provision and revoke bearer keys scoped to your account.
+  - name: Auth
+    description: |
+      JSON sign-in for browser clients. The form-encoded `/login`, `/signup`
+      and `/logout` at the origin root answer with a 302 or plain text and
+      exist for the HTMX terminal; these return status codes and JSON, and
+      set the same session + refresh cookies.
 
 # Default security — a bearer API key. Individual operations that accept
 # no auth override with `security: []`.
@@ -529,6 +535,111 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: authLogin
+      summary: Sign in with a username and password
+      description: |
+        Sets the `session` cookie (24h) and a refresh cookie (90d) on success.
+        Rate limited to 5 attempts per IP per minute, shared with the
+        form-encoded `/login`. An unknown username and a wrong password are
+        indistinguishable in both response and timing; a locked account is
+        reported only once the password has checked out.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CredentialsRequest' }
+      responses:
+        '200':
+          description: Signed in. Cookies are set on this response.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Credentials are correct but the account is suspended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: "Account access suspended. Contact administrator." }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/signup:
+    post:
+      tags: [Auth]
+      operationId: authSignup
+      summary: Register an account
+      description: |
+        Auto-signs-in on success, so the response carries the same cookies as
+        `/auth/login`. Usernames are rejected if they contain control
+        characters or Unicode lookalikes of an existing handle.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CredentialsRequest' }
+      responses:
+        '200':
+          description: Account created and signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Username already taken.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: "Username already exists" }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: authLogout
+      summary: End the current session
+      description: |
+        Blacklists the access token so it cannot be replayed before its
+        natural expiry, drops the refresh token, and clears both cookies.
+        Always succeeds.
+      security: []
+      responses:
+        '200':
+          description: Session ended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: authRefresh
+      summary: Renew an expired access token
+      description: |
+        Exchanges a valid refresh cookie for a new session cookie, written to
+        this response. Intended for a client that has just seen a 401 and
+        wants to replay the original request rather than bounce the user to
+        a sign-in screen.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Renewed. A new session cookie is set on this response.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401':
+          description: No usable refresh token — the caller must sign in again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: "Session expired" }
+
 # ──────────────────────────────────────────────────────────────────────────
 # Components
 # ──────────────────────────────────────────────────────────────────────────
@@ -587,6 +698,27 @@ components:
           example: { error: "rate limit exceeded" }
 
   schemas:
+    CredentialsRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username: { type: string, example: kwame }
+        password: { type: string, format: password }
+
+    SessionResponse:
+      type: object
+      required: [isAuthenticated]
+      description: |
+        A summary of the resulting session. `GET /me` returns the full
+        identity envelope (email verification state, linked provider,
+        available OAuth providers) when a client needs it.
+      properties:
+        isAuthenticated: { type: boolean, example: true }
+        username: { type: string, example: kwame }
+        role: { type: string, enum: [user, pro, analyst, bot, admin], example: user }
+        isAdmin: { type: boolean, example: false }
+
     Error:
       type: object
       required: [error]

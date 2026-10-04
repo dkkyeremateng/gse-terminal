@@ -29,27 +29,27 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  // Login goes through the dev-server JSON bridge (`vite.config.ts`'s
-  // `loginJsonBridge`) because the legacy backend `/login` replies with
-  // a 302 or plain text — neither is JSON, so the typed client rejects
-  // it. The bridge forwards form-encoded credentials upstream, relays
-  // Set-Cookie, and returns `{ ok: true }` on success. On the canonical
-  // identity envelope we still re-fetch `/v1/me`.
+  // The /v1/auth/* endpoints are the JSON counterparts to the legacy
+  // /login, /signup and /logout, which answer with a 302 or plain text —
+  // neither of which the typed client can read. They set the same session
+  // and refresh cookies, so the follow-up /v1/me returns the full identity
+  // envelope (provider, email verification, available OAuth providers)
+  // that the login response's summary deliberately omits.
   login: async ({ username, password }) => {
-    await api.post('/api/v1/auth/login', { username, password })
+    await api.post('/v1/auth/login', { username, password })
     const me = await api.get<Me>('/v1/me')
     set({ me, status: me.isAuthenticated ? 'authenticated' : 'unauthenticated' })
   },
 
   signup: async ({ username, password }) => {
-    await api.post('/signup', undefined, { form: { username, password } })
+    await api.post('/v1/auth/signup', { username, password })
     const me = await api.get<Me>('/v1/me')
     set({ me, status: me.isAuthenticated ? 'authenticated' : 'unauthenticated' })
   },
 
   logout: async () => {
     try {
-      await api.post('/logout')
+      await api.post('/v1/auth/logout')
     } catch {
       /* ignore — local state still resets */
     }

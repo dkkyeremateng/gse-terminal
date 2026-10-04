@@ -192,6 +192,13 @@ self.addEventListener('fetch', (event) => {
     if (url.pathname.startsWith('/v1/me')) return;
     // WebSocket upgrades pass through.
     if (url.pathname === '/ws') return;
+    // The React client at /v2 is a separate app with its own hashed
+    // bundles and its own client-side router. This worker is registered
+    // at the origin root, so without this its navigation fallback would
+    // answer a /v2 deep link with the legacy offline shell, and its
+    // cacheFirst rules would pin /v2 assets that a deploy has replaced.
+    // Leave that subtree entirely to the network.
+    if (url.pathname === '/v2' || url.pathname.startsWith('/v2/')) return;
 
     if (isStaticAsset(url)) {
         event.respondWith(cacheFirst(request));

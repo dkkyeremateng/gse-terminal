@@ -2,8 +2,8 @@
   "name": "GES Pro Terminal",
   "short_name": "GES Pro",
   "description": "Modern terminal for the Ghana Stock Exchange — live quotes, watchlists, alerts, AI insights, and portfolio tracking.",
-  "start_url": "/dashboard",
-  "scope": "/",
+  "start_url": "/v2/dashboard",
+  "scope": "/v2/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0A0B0F",
@@ -11,7 +11,7 @@
   "categories": ["finance", "business", "productivity"],
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "/v2/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"

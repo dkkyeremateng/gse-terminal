@@ -2,8 +2,8 @@
 <html lang="en" class="">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
     <meta name="apple-mobile-web-app-title" content="GES Pro" />
@@ -13,20 +13,7 @@
     <meta name="theme-color" content="#0A0B0F" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
     <title>GES Pro Terminal</title>
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem('ges-pro-theme') || 'dark';
-          var resolved =
-            t === 'system'
-              ? window.matchMedia('(prefers-color-scheme: light)').matches
-                ? 'light'
-                : 'dark'
-              : t;
-          if (resolved === 'light') document.documentElement.classList.add('light');
-        } catch (_) {}
-      })();
-    </script>
+    <script src="%BASE_URL%theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

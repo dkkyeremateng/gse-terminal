@@ -5,7 +5,7 @@
  *  - Same-origin in dev (Vite proxies /v1, /auth, /login etc → :8080)
  *  - Sends credentials so the JWT cookie / session cookie is included
  *  - Surfaces request IDs and structured ApiError on non-2xx
- *  - Auto-refreshes once on 401 via /auth/refresh, then replays the original request
+ *  - Auto-refreshes once on 401 via /v1/auth/refresh, then replays the original request
  *  - Single-flights concurrent refreshes
  */
 
@@ -62,7 +62,7 @@ const refreshToken = async (): Promise<boolean> => {
   if (refreshInFlight) return refreshInFlight
   refreshInFlight = (async () => {
     try {
-      const res = await fetch('/auth/refresh', {
+      const res = await fetch('/v1/auth/refresh', {
         method: 'POST',
         credentials: 'include',
       })
@@ -104,7 +104,10 @@ export async function apiFetch<T = unknown>(path: string, init: FetchInit = {}):
 
   let res = await doFetch()
 
-  if (res.status === 401 && !path.startsWith('/auth/')) {
+  // Anything under /v1/auth/ is excluded: refreshing in response to a
+  // failed sign-in would loop, and a 401 from the refresh endpoint is the
+  // answer, not a reason to ask again.
+  if (res.status === 401 && !path.startsWith('/v1/auth/')) {
     const ok = await refreshToken()
     if (ok) {
       res = await doFetch()
@@ -123,16 +126,20 @@ export async function apiFetch<T = unknown>(path: string, init: FetchInit = {}):
   const payload = contentType.includes('application/json') ? await res.json() : await res.text()
 
   if (!res.ok) {
+    // The Go API's error envelope is {"error": "..."} (see respondError in
+    // internal/server/response.go); `message` is accepted too so a handler
+    // that uses the other spelling still surfaces its text rather than a
+    // bare status code.
+    const envelope = typeof payload === 'object' && payload ? (payload as Record<string, unknown>) : null
     const message =
-      typeof payload === 'object' && payload && 'message' in payload
-        ? String((payload as { message: unknown }).message)
-        : typeof payload === 'string' && payload
-          ? payload
-          : `Request failed with status ${res.status}`
-    const code =
-      typeof payload === 'object' && payload && 'code' in payload
-        ? String((payload as { code: unknown }).code)
-        : undefined
+      envelope && typeof envelope.message === 'string' && envelope.message
+        ? envelope.message
+        : envelope && typeof envelope.error === 'string' && envelope.error
+          ? envelope.error
+          : typeof payload === 'string' && payload
+            ? payload
+            : `Request failed with status ${res.status}`
+    const code = envelope && 'code' in envelope ? String(envelope.code) : undefined
     throw new ApiError({ status: res.status, message, code, requestId, details: payload })
   }
 
