@@ -18,8 +18,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/gse-terminal
-EnvironmentFile=/opt/gse-terminal/.env
+WorkingDirectory=/home/teckdroids/apps/gse-terminal
+EnvironmentFile=/home/teckdroids/apps/gse-terminal/.env
 
 # Pull first so a restart picks up a newer image if one was pushed; failure
 # is tolerated so the stack still starts when the registry is unreachable.

@@ -17,9 +17,14 @@ files in this repo.
 
 ## First deploy
 
+The stack lives at `/home/teckdroids/apps/gse-terminal`. The systemd units in
+this directory hard-code that path, so if you clone somewhere else, edit
+`WorkingDirectory`, `EnvironmentFile` and `ExecStart` in them to match before
+installing.
+
 ```bash
-sudo mkdir -p /opt/gse-terminal && sudo chown "$USER" /opt/gse-terminal
-git clone <repo> /opt/gse-terminal && cd /opt/gse-terminal
+mkdir -p /home/teckdroids/apps
+git clone <repo> /home/teckdroids/apps/gse-terminal && cd /home/teckdroids/apps/gse-terminal
 
 cp .env.example .env
 ```
@@ -100,7 +105,7 @@ docker exec gse_postgres pg_restore -U gse_user -d gse_db --clean /tmp/pg.dump
 
 # QuestDB — stop the app first so nothing writes mid-restore
 docker compose stop app questdb
-docker run --rm -v ges_pro_questdb_data:/data -v "$PWD/backups/<stamp>":/b \
+docker run --rm -v gse-terminal_questdb_data:/data -v "$PWD/backups/<stamp>":/b \
   alpine:3.19 sh -c 'rm -rf /data/* && tar xzf /b/questdb-data.tar.gz -C /data'
 docker compose start questdb app
 ```
@@ -108,7 +113,7 @@ docker compose start questdb app
 ## Updating
 
 ```bash
-cd /opt/gse-terminal && git pull && make vm-up
+cd /home/teckdroids/apps/gse-terminal && git pull && make vm-up
 ```
 
 The Go binary and UI are baked into the image, so a rebuild is required for
@@ -206,7 +211,13 @@ it alone unless the release changed how insights are generated.
   OOM-killed each afternoon, that's the cause.
 - **Health**: `/healthz` is liveness, `/readyz` checks Postgres, Redis, and
   QuestDB. Both are unauthenticated and safe to expose.
-- **Data lives in Docker volumes** (`ges_pro_postgres_data`,
-  `ges_pro_questdb_data`). `docker compose down -v` destroys them.
+- **Data lives in Docker volumes** (`gse-terminal_postgres_data`,
+  `gse-terminal_questdb_data`). Compose prefixes them with the project name,
+  which defaults to the checkout's directory name — clone into a directory
+  with a different name and they change with it, which is why the restore
+  command above names the volume explicitly. Check with `docker volume ls`
+  before restoring: `docker run -v` on a name that doesn't exist creates an
+  empty volume and restores into that, leaving the live data untouched.
+  `docker compose down -v` destroys them.
 - **Log inspection**: `make vm-logs`. The overlay sets `LOG_FORMAT=json`
   for shipping to a collector.
