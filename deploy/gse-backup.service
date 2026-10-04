@@ -4,5 +4,5 @@ After=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/gse-terminal
-ExecStart=/opt/gse-terminal/scripts/backup.sh /var/backups/gse-terminal
+WorkingDirectory=/home/teckdroids/apps/gse-terminal
+ExecStart=/home/teckdroids/apps/gse-terminal/scripts/backup.sh /var/backups/gse-terminal
