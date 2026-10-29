@@ -78,13 +78,24 @@ func main() {
 		}
 	}
 
-	// 1.1 Init QuestDB
-	qdbRepo, err := repository.NewQuestDBRepo(ctx, cfg.QuestDBILPURL, cfg.QuestDBURL)
+	// 1.1 Init QuestDB. Required, not optional: this used to log a warning
+	// and carry on with a nil repo, which is how a host reboot on 2026-10-18
+	// took the site down for eleven days. Docker restarts every container
+	// at once after a reboot (depends_on is not honoured there), the app
+	// beat QuestDB's ILP listener by a second, and every price-reading page
+	// then panicked on the nil repo — while the scrape daemon, alerts and
+	// briefings never started and /readyz kept answering "ready".
+	//
+	// Retry for a bounded window to ride out that startup race, then exit
+	// so the restart policy tries again rather than serving a broken app.
+	qdbRepo, err := connectWithRetry(ctx, "questdb", questDBConnectWindow, func(ctx context.Context) (*repository.QuestDBRepo, error) {
+		return repository.NewQuestDBRepo(ctx, cfg.QuestDBILPURL, cfg.QuestDBURL)
+	})
 	if err != nil {
-		slog.Warn("Failed to connect to QuestDB", "error", err)
-	} else {
-		defer qdbRepo.Close(ctx)
+		slog.Error("Failed to connect to QuestDB", "error", err)
+		os.Exit(1)
 	}
+	defer qdbRepo.Close(ctx)
 
 	redisRepo := repository.NewRedisRepo(cfg.RedisURL)
 	defer redisRepo.Close()
@@ -101,10 +112,8 @@ func main() {
 		if err := redisRepo.Ping(hctx); err != nil {
 			hErrs = append(hErrs, fmt.Sprintf("redis: %v", err))
 		}
-		if qdbRepo != nil {
-			if err := qdbRepo.Ping(hctx); err != nil {
-				hErrs = append(hErrs, fmt.Sprintf("questdb: %v", err))
-			}
+		if err := qdbRepo.Ping(hctx); err != nil {
+			hErrs = append(hErrs, fmt.Sprintf("questdb: %v", err))
 		}
 		hcancel()
 		if len(hErrs) > 0 {
@@ -438,10 +447,8 @@ func main() {
 		if err := redisRepo.Ping(rctx); err != nil {
 			errs = append(errs, fmt.Sprintf("redis: %v", err))
 		}
-		if qdbRepo != nil {
-			if err := qdbRepo.Ping(rctx); err != nil {
-				errs = append(errs, fmt.Sprintf("questdb: %v", err))
-			}
+		if err := qdbRepo.Ping(rctx); err != nil {
+			errs = append(errs, fmt.Sprintf("questdb: %v", err))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if len(errs) > 0 {
